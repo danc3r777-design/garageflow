@@ -1,0 +1,317 @@
+* {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  margin: 0;
+  min-height: 100%;
+}
+
+body {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
+
+  background: #eef2f7;
+  color: #0f1d36;
+}
+
+button {
+  font: inherit;
+}
+
+.app {
+  width: 100%;
+  max-width: 520px;
+  min-height: 100vh;
+  margin: 0 auto;
+  background: #f6f8fb;
+  padding-bottom: 155px;
+}
+
+.header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 24px 20px 15px;
+}
+
+.logo {
+  font-size: 30px;
+  font-weight: 800;
+  letter-spacing: -1.4px;
+}
+
+.logo span {
+  color: #1672f3;
+}
+
+.subtitle {
+  color: #7b879b;
+  font-size: 13px;
+  margin-top: 2px;
+}
+
+.iconButton {
+  position: relative;
+  width: 44px;
+  height: 44px;
+  border: 0;
+  border-radius: 14px;
+  background: white;
+  color: #13213a;
+  display: grid;
+  place-items: center;
+  box-shadow: 0 5px 20px rgba(22, 39, 72, 0.08);
+}
+
+.notificationDot {
+  position: absolute;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: #ff4d4f;
+  right: 9px;
+  top: 8px;
+  border: 2px solid white;
+}
+
+main {
+  padding: 0 16px;
+}
+
+.vehicleCard {
+  background: white;
+  border-radius: 22px;
+  padding: 20px;
+  box-shadow: 0 8px 30px rgba(24, 43, 77, 0.07);
+}
+
+.vehicleTop {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 10px;
+}
+
+.vehicleLabel {
+  color: #1672f3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.8px;
+}
+
+.vehicleCard h1 {
+  font-size: 23px;
+  margin: 5px 0;
+  letter-spacing: -0.5px;
+}
+
+.vehicleCard p {
+  color: #778399;
+  margin: 0;
+  font-size: 14px;
+}
+
+.vanIcon {
+  font-size: 55px;
+}
+
+.linkButton {
+  margin-top: 18px;
+  padding: 0;
+  background: none;
+  border: 0;
+  color: #1468d8;
+  font-weight: 600;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+}
+
+.section {
+  margin-top: 26px;
+}
+
+.sectionHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  padding: 0 4px 12px;
+}
+
+.sectionHeader h2 {
+  margin: 0;
+  font-size: 21px;
+  letter-spacing: -0.4px;
+}
+
+.sectionHeader p {
+  color: #8490a3;
+  font-size: 13px;
+  margin: 4px 0 0;
+}
+
+.serviceList {
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.serviceCard {
+  background: white;
+  border: 1.5px solid transparent;
+  border-radius: 18px;
+  padding: 17px;
+  box-shadow: 0 5px 20px rgba(24, 43, 77, 0.045);
+}
+
+.serviceCard.selected {
+  border-color: #1672f3;
+}
+
+.serviceContent {
+  display: flex;
+  justify-content: space-between;
+  gap: 15px;
+}
+
+.serviceCard h3 {
+  margin: 0 0 3px;
+  font-size: 18px;
+}
+
+.serviceCard strong {
+  display: block;
+  color: #183052;
+  font-size: 14px;
+  margin-bottom: 4px;
+}
+
+.serviceCard p {
+  margin: 0;
+  color: #8390a4;
+  font-size: 13px;
+}
+
+.check {
+  flex: 0 0 auto;
+  width: 32px;
+  height: 32px;
+  border-radius: 50%;
+  border: 2px solid #c7cfda;
+  display: grid;
+  place-items: center;
+}
+
+.selectedCheck {
+  border-color: #1672f3;
+  background: #1672f3;
+  color: white;
+}
+
+.materials {
+  display: flex;
+  overflow-x: auto;
+  gap: 7px;
+  margin-top: 15px;
+  padding-top: 13px;
+  border-top: 1px solid #edf0f4;
+}
+
+.material {
+  flex: 0 0 auto;
+  background: #edf1f6;
+  padding: 9px 12px;
+  border-radius: 12px;
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.material.active {
+  background: #172b4d;
+  color: white;
+}
+
+.totalBar {
+  position: fixed;
+  z-index: 10;
+  bottom: 68px;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 100%);
+  background: rgba(255, 255, 255, 0.96);
+  backdrop-filter: blur(12px);
+  border-top: 1px solid #e8ecf2;
+  padding: 12px 16px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 15px;
+}
+
+.totalBar span {
+  display: block;
+  color: #7e899a;
+  font-size: 12px;
+}
+
+.totalBar strong {
+  display: block;
+  font-size: 25px;
+  margin-top: 1px;
+}
+
+.continueButton {
+  border: 0;
+  border-radius: 14px;
+  background: #126be7;
+  color: white;
+  padding: 14px 19px;
+  font-weight: 700;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.bottomNav {
+  position: fixed;
+  z-index: 11;
+  bottom: 0;
+  left: 50%;
+  transform: translateX(-50%);
+  width: min(520px, 100%);
+  height: 69px;
+  background: white;
+  border-top: 1px solid #e8ecf2;
+  display: grid;
+  grid-template-columns: repeat(4, 1fr);
+}
+
+.navItem {
+  border: 0;
+  background: transparent;
+  color: #8a95a6;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  font-size: 10px;
+}
+
+.activeNav {
+  color: #126be7;
+  font-weight: 700;
+}
+
+@media (min-width: 600px) {
+  .app {
+    box-shadow: 0 0 50px rgba(23, 39, 69, 0.12);
+  }
+}
