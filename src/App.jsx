@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useEffect, useState } from "react";
+import { supabase } from "./supabase.js";
+
 import {
   Bell,
   ChevronRight,
@@ -9,49 +11,43 @@ import {
   Check,
 } from "lucide-react";
 
-const services = [
-  {
-    id: 1,
-    name: "Пол",
-    description: "Надёжная защита грузового отсека",
-    price: 15000,
-    selected: true,
-  },
-  {
-    id: 2,
-    name: "Стены",
-    description: "Защита кузова от повреждений",
-    price: 18000,
-    selected: true,
-  },
-  {
-    id: 3,
-    name: "Колёсные арки",
-    description: "Защита уязвимых зон",
-    price: 6000,
-    selected: false,
-  },
-  {
-    id: 4,
-    name: "Виброизоляция",
-    description: "Тише и комфортнее в дороге",
-    price: 15000,
-    selected: true,
-  },
-  {
-    id: 5,
-    name: "Утепление",
-    description: "Комфорт в любую погоду",
-    price: 18000,
-    selected: false,
-  },
-];
-
 function formatPrice(price) {
   return new Intl.NumberFormat("ru-RU").format(price) + " ₽";
 }
 
 export default function App() {
+  const [services, setServices] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => {
+    async function loadServices() {
+      const { data, error } = await supabase
+        .from("services")
+        .select("*")
+        .eq("is_active", true)
+        .order("id");
+
+      if (error) {
+        console.error("Ошибка загрузки услуг:", error);
+      } else {
+        const servicesWithSelection = data.map((service) => ({
+          ...service,
+          price: Number(service.base_price),
+
+          // Пока оставляем выбранными:
+          // Пол, Стены и Виброизоляцию.
+          selected: [1, 2, 7].includes(service.id),
+        }));
+
+        setServices(servicesWithSelection);
+      }
+
+      setLoading(false);
+    }
+
+    loadServices();
+  }, []);
+
   const total = services
     .filter((service) => service.selected)
     .reduce((sum, service) => sum + service.price, 0);
@@ -63,7 +59,10 @@ export default function App() {
           <div className="logo">
             Garage<span>Flow</span>
           </div>
-          <div className="subtitle">Коммерческий транспорт</div>
+
+          <div className="subtitle">
+            Коммерческий транспорт
+          </div>
         </div>
 
         <button className="iconButton">
@@ -76,12 +75,20 @@ export default function App() {
         <section className="vehicleCard">
           <div className="vehicleTop">
             <div>
-              <div className="vehicleLabel">МОЙ АВТОМОБИЛЬ</div>
+              <div className="vehicleLabel">
+                МОЙ АВТОМОБИЛЬ
+              </div>
+
               <h1>Ford Transit L3H2</h1>
-              <p>2023 · Передний привод</p>
+
+              <p>
+                2023 · Передний привод
+              </p>
             </div>
 
-            <div className="vanIcon">🚐</div>
+            <div className="vanIcon">
+              🚐
+            </div>
           </div>
 
           <button className="linkButton">
@@ -93,64 +100,93 @@ export default function App() {
         <section className="section">
           <div className="sectionHeader">
             <div>
-              <h2>Выберите дооборудование</h2>
-              <p>Можно выбрать несколько вариантов</p>
+              <h2>
+                Выберите дооборудование
+              </h2>
+
+              <p>
+                Можно выбрать несколько вариантов
+              </p>
             </div>
 
             <SlidersHorizontal size={22} />
           </div>
 
-          <div className="serviceList">
-            {services.map((service) => (
-              <div
-                key={service.id}
-                className={
-                  service.selected
-                    ? "serviceCard selected"
-                    : "serviceCard"
-                }
-              >
-                <div className="serviceContent">
-                  <div>
-                    <h3>{service.name}</h3>
-                    <strong>от {formatPrice(service.price)}</strong>
-                    <p>{service.description}</p>
+          {loading ? (
+            <div className="serviceCard">
+              Загружаем услуги...
+            </div>
+          ) : (
+            <div className="serviceList">
+              {services.map((service) => (
+                <div
+                  key={service.id}
+                  className={
+                    service.selected
+                      ? "serviceCard selected"
+                      : "serviceCard"
+                  }
+                >
+                  <div className="serviceContent">
+                    <div>
+                      <h3>
+                        {service.name}
+                      </h3>
+
+                      <strong>
+                        от {formatPrice(service.price)}
+                      </strong>
+
+                      <p>
+                        {service.description}
+                      </p>
+                    </div>
+
+                    <div
+                      className={
+                        service.selected
+                          ? "check selectedCheck"
+                          : "check"
+                      }
+                    >
+                      {service.selected && (
+                        <Check size={19} />
+                      )}
+                    </div>
                   </div>
 
-                  <div
-                    className={
-                      service.selected
-                        ? "check selectedCheck"
-                        : "check"
-                    }
-                  >
-                    {service.selected && <Check size={19} />}
-                  </div>
+                  {service.name === "Пол" &&
+                    service.selected && (
+                      <div className="materials">
+                        <span className="material active">
+                          Ламинированная фанера
+                        </span>
+
+                        <span className="material">
+                          Берёзовая фанера
+                        </span>
+
+                        <span className="material">
+                          Алюминий
+                        </span>
+                      </div>
+                    )}
                 </div>
-
-                {service.name === "Пол" && service.selected && (
-                  <div className="materials">
-                    <span className="material active">
-                      Ламинированная фанера
-                    </span>
-                    <span className="material">
-                      Берёзовая фанера
-                    </span>
-                    <span className="material">
-                      Алюминий
-                    </span>
-                  </div>
-                )}
-              </div>
-            ))}
-          </div>
+              ))}
+            </div>
+          )}
         </section>
       </main>
 
       <div className="totalBar">
         <div>
-          <span>Предварительно</span>
-          <strong>{formatPrice(total)}</strong>
+          <span>
+            Предварительно
+          </span>
+
+          <strong>
+            {formatPrice(total)}
+          </strong>
         </div>
 
         <button className="continueButton">
@@ -162,25 +198,32 @@ export default function App() {
       <nav className="bottomNav">
         <button className="navItem activeNav">
           <SlidersHorizontal size={21} />
-          <span>Конфигуратор</span>
+          <span>
+            Конфигуратор
+          </span>
         </button>
 
         <button className="navItem">
           <ClipboardList size={21} />
-          <span>Заказы</span>
+          <span>
+            Заказы
+          </span>
         </button>
 
         <button className="navItem">
           <Car size={21} />
-          <span>Автомобиль</span>
+          <span>
+            Автомобиль
+          </span>
         </button>
 
         <button className="navItem">
           <Headphones size={21} />
-          <span>Поддержка</span>
+          <span>
+            Поддержка
+          </span>
         </button>
       </nav>
     </div>
   );
 }
-
