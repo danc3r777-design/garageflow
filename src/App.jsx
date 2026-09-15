@@ -33,10 +33,7 @@ export default function App() {
         const servicesWithSelection = data.map((service) => ({
           ...service,
           price: Number(service.base_price),
-
-          // Пока оставляем выбранными:
-          // Пол, Стены и Виброизоляцию.
-          selected: [1, 2, 7].includes(service.id),
+          selected: false,
         }));
 
         setServices(servicesWithSelection);
@@ -48,9 +45,27 @@ export default function App() {
     loadServices();
   }, []);
 
-  const total = services
-    .filter((service) => service.selected)
-    .reduce((sum, service) => sum + service.price, 0);
+  function toggleService(serviceId) {
+    setServices((currentServices) =>
+      currentServices.map((service) =>
+        service.id === serviceId
+          ? {
+              ...service,
+              selected: !service.selected,
+            }
+          : service
+      )
+    );
+  }
+
+  const selectedServices = services.filter(
+    (service) => service.selected
+  );
+
+  const total = selectedServices.reduce(
+    (sum, service) => sum + service.price,
+    0
+  );
 
   return (
     <div className="app">
@@ -81,14 +96,10 @@ export default function App() {
 
               <h1>Ford Transit L3H2</h1>
 
-              <p>
-                2023 · Передний привод
-              </p>
+              <p>2023 · Передний привод</p>
             </div>
 
-            <div className="vanIcon">
-              🚐
-            </div>
+            <div className="vanIcon">🚐</div>
           </div>
 
           <button className="linkButton">
@@ -100,9 +111,7 @@ export default function App() {
         <section className="section">
           <div className="sectionHeader">
             <div>
-              <h2>
-                Выберите дооборудование
-              </h2>
+              <h2>Выберите дооборудование</h2>
 
               <p>
                 Можно выбрать несколько вариантов
@@ -126,20 +135,20 @@ export default function App() {
                       ? "serviceCard selected"
                       : "serviceCard"
                   }
+                  onClick={() =>
+                    toggleService(service.id)
+                  }
+                  style={{ cursor: "pointer" }}
                 >
                   <div className="serviceContent">
                     <div>
-                      <h3>
-                        {service.name}
-                      </h3>
+                      <h3>{service.name}</h3>
 
                       <strong>
                         от {formatPrice(service.price)}
                       </strong>
 
-                      <p>
-                        {service.description}
-                      </p>
+                      <p>{service.description}</p>
                     </div>
 
                     <div
@@ -157,7 +166,12 @@ export default function App() {
 
                   {service.name === "Пол" &&
                     service.selected && (
-                      <div className="materials">
+                      <div
+                        className="materials"
+                        onClick={(event) =>
+                          event.stopPropagation()
+                        }
+                      >
                         <span className="material active">
                           Ламинированная фанера
                         </span>
@@ -180,16 +194,21 @@ export default function App() {
 
       <div className="totalBar">
         <div>
-          <span>
-            Предварительно
-          </span>
+          <span>Предварительно</span>
 
-          <strong>
-            {formatPrice(total)}
-          </strong>
+          <strong>{formatPrice(total)}</strong>
         </div>
 
-        <button className="continueButton">
+        <button
+          className="continueButton"
+          disabled={selectedServices.length === 0}
+          style={{
+            opacity:
+              selectedServices.length === 0
+                ? 0.5
+                : 1,
+          }}
+        >
           Продолжить
           <ChevronRight size={20} />
         </button>
@@ -198,32 +217,26 @@ export default function App() {
       <nav className="bottomNav">
         <button className="navItem activeNav">
           <SlidersHorizontal size={21} />
-          <span>
-            Конфигуратор
-          </span>
+          <span>Конфигуратор</span>
         </button>
 
         <button className="navItem">
           <ClipboardList size={21} />
-          <span>
-            Заказы
-          </span>
+          <span>Заказы</span>
         </button>
 
         <button className="navItem">
           <Car size={21} />
-          <span>
-            Автомобиль
-          </span>
+          <span>Автомобиль</span>
         </button>
 
         <button className="navItem">
           <Headphones size={21} />
-          <span>
-            Поддержка
-          </span>
+          <span>Поддержка</span>
         </button>
       </nav>
     </div>
   );
 }
+
+
