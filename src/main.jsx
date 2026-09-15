@@ -8,7 +8,7 @@ import App from "./App.jsx";
 import CrmApp from "./CrmApp.jsx";
 
 import "./index.css";
-import "./crm.css";
+import "./Crm.css";
 
 const isCrm =
   window.location.pathname.startsWith(
