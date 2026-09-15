@@ -1,12 +1,28 @@
-import React, { StrictMode } from "react";
+import React, {
+  StrictMode,
+} from "react";
+
 import { createRoot } from "react-dom/client";
 
 import App from "./App.jsx";
-import "./index.css";
+import CrmApp from "./CrmApp.jsx";
 
-createRoot(document.getElementById("root")).render(
+import "./index.css";
+import "./crm.css";
+
+const isCrm =
+  window.location.pathname.startsWith(
+    "/crm"
+  );
+
+createRoot(
+  document.getElementById("root")
+).render(
   <StrictMode>
-    <App />
+    {isCrm ? (
+      <CrmApp />
+    ) : (
+      <App />
+    )}
   </StrictMode>
 );
-
