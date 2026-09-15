@@ -590,3 +590,104 @@
       repeat(2, 1fr);
   }
 }
+.crmEditInput,
+.crmEditTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+  font: inherit;
+  color: #17191d;
+  outline: none;
+}
+
+.crmEditInput:focus,
+.crmEditTextarea:focus {
+  border-color: #20242b;
+}
+
+.crmEditTextarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.crmPriceInputWrap {
+  position: relative;
+}
+
+.crmPriceInputWrap input {
+  padding-right: 45px;
+}
+
+.crmPriceInputWrap > span {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #747b86;
+  font-weight: 600;
+}
+
+.crmModalActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.crmSaveButton,
+.crmCancelButton {
+  border: 0;
+  border-radius: 10px;
+  padding: 13px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.crmSaveButton {
+  flex: 1;
+  background: #181b20;
+  color: #fff;
+}
+
+.crmCancelButton {
+  background: #fff0f0;
+  color: #c52d2d;
+}
+
+.crmSaveButton:disabled,
+.crmCancelButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.crmSaveSuccess {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: #edf8f0;
+  color: #287a3e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .crmModalActions {
+    flex-direction: column;
+  }
+
+  .crmSaveButton,
+  .crmCancelButton {
+    width: 100%;
+  }
+}
+
+
+
+
+
