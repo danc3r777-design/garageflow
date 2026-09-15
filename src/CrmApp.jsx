@@ -25,6 +25,7 @@ import {
   UserRound,
 } from "lucide-react";
 
+
 const columns = [
   {
     key: "new",
@@ -48,6 +49,7 @@ const columns = [
   },
 ];
 
+
 const statusLabels = {
   new: "Новая заявка",
   approval: "Согласование",
@@ -56,6 +58,7 @@ const statusLabels = {
   done: "Готово",
   cancelled: "Отменён",
 };
+
 
 function formatPrice(value) {
   return (
@@ -66,8 +69,11 @@ function formatPrice(value) {
   );
 }
 
+
 function formatDate(value) {
-  if (!value) return "";
+  if (!value) {
+    return "";
+  }
 
   return new Intl.DateTimeFormat(
     "ru-RU",
@@ -80,6 +86,7 @@ function formatDate(value) {
     }
   ).format(new Date(value));
 }
+
 
 function getCustomerName(customer) {
   if (!customer) {
@@ -100,6 +107,7 @@ function getCustomerName(customer) {
   );
 }
 
+
 function getVehicleName(vehicle) {
   if (!vehicle) {
     return "Автомобиль не указан";
@@ -114,12 +122,43 @@ function getVehicleName(vehicle) {
     .join(" ");
 }
 
+
+function getDateTimeLocalValue(value) {
+  if (!value) {
+    return "";
+  }
+
+  const date = new Date(value);
+
+  if (
+    Number.isNaN(date.getTime())
+  ) {
+    return "";
+  }
+
+  const offset =
+    date.getTimezoneOffset();
+
+  const localDate =
+    new Date(
+      date.getTime() -
+        offset * 60 * 1000
+    );
+
+  return localDate
+    .toISOString()
+    .slice(0, 16);
+}
+
+
 export default function CrmApp() {
   const [session, setSession] =
     useState(null);
 
-  const [checkingAuth, setCheckingAuth] =
-    useState(true);
+  const [
+    checkingAuth,
+    setCheckingAuth,
+  ] = useState(true);
 
   const [email, setEmail] =
     useState("");
@@ -127,11 +166,15 @@ export default function CrmApp() {
   const [password, setPassword] =
     useState("");
 
-  const [loginLoading, setLoginLoading] =
-    useState(false);
+  const [
+    loginLoading,
+    setLoginLoading,
+  ] = useState(false);
 
-  const [loginError, setLoginError] =
-    useState("");
+  const [
+    loginError,
+    setLoginError,
+  ] = useState("");
 
   const [employee, setEmployee] =
     useState(null);
@@ -157,6 +200,26 @@ export default function CrmApp() {
     changingStatus,
     setChangingStatus,
   ] = useState(false);
+
+  const [
+    editingOrder,
+    setEditingOrder,
+  ] = useState({
+    final_price: "",
+    manager_comment: "",
+    scheduled_at: "",
+  });
+
+  const [
+    savingOrder,
+    setSavingOrder,
+  ] = useState(false);
+
+  const [
+    saveMessage,
+    setSaveMessage,
+  ] = useState("");
+
 
   useEffect(() => {
     let mounted = true;
@@ -199,6 +262,7 @@ export default function CrmApp() {
     };
   }, []);
 
+
   async function getAccessToken() {
     const {
       data: { session },
@@ -210,6 +274,7 @@ export default function CrmApp() {
       null
     );
   }
+
 
   async function invokeCrmFunction(
     functionName,
@@ -257,6 +322,7 @@ export default function CrmApp() {
     return data;
   }
 
+
   async function loadOrders() {
     setLoading(true);
     setError("");
@@ -274,6 +340,36 @@ export default function CrmApp() {
       setOrders(
         data.orders || []
       );
+
+      if (selectedOrder) {
+        const refreshed =
+          (data.orders || []).find(
+            (order) =>
+              order.id ===
+              selectedOrder.id
+          );
+
+        if (refreshed) {
+          setSelectedOrder(
+            refreshed
+          );
+
+          setEditingOrder({
+            final_price:
+              refreshed.final_price ??
+              "",
+
+            manager_comment:
+              refreshed.manager_comment ??
+              "",
+
+            scheduled_at:
+              getDateTimeLocalValue(
+                refreshed.scheduled_at
+              ),
+          });
+        }
+      }
     } catch (err) {
       console.error(err);
 
@@ -287,6 +383,7 @@ export default function CrmApp() {
     }
   }
 
+
   async function login(event) {
     event.preventDefault();
 
@@ -298,12 +395,11 @@ export default function CrmApp() {
         data,
         error,
       } =
-        await supabase.auth.signInWithPassword(
-          {
+        await supabase.auth
+          .signInWithPassword({
             email,
             password,
-          }
-        );
+          });
 
       if (error) {
         throw error;
@@ -325,6 +421,7 @@ export default function CrmApp() {
     }
   }
 
+
   async function logout() {
     await supabase.auth.signOut();
 
@@ -333,6 +430,27 @@ export default function CrmApp() {
     setOrders([]);
     setSelectedOrder(null);
   }
+
+
+  function openOrder(order) {
+    setEditingOrder({
+      final_price:
+        order.final_price ?? "",
+
+      manager_comment:
+        order.manager_comment ?? "",
+
+      scheduled_at:
+        getDateTimeLocalValue(
+          order.scheduled_at
+        ),
+    });
+
+    setSaveMessage("");
+    setError("");
+    setSelectedOrder(order);
+  }
+
 
   async function changeStatus(
     order,
@@ -347,6 +465,7 @@ export default function CrmApp() {
 
     setChangingStatus(true);
     setError("");
+    setSaveMessage("");
 
     try {
       await invokeCrmFunction(
@@ -377,11 +496,17 @@ export default function CrmApp() {
         selectedOrder?.id ===
         order.id
       ) {
-        setSelectedOrder({
-          ...selectedOrder,
-          status,
-        });
+        setSelectedOrder(
+          (current) => ({
+            ...current,
+            status,
+          })
+        );
       }
+
+      setSaveMessage(
+        "Статус изменён"
+      );
     } catch (err) {
       console.error(err);
 
@@ -394,6 +519,183 @@ export default function CrmApp() {
       setChangingStatus(false);
     }
   }
+
+
+  async function saveOrderChanges() {
+    if (
+      !selectedOrder ||
+      savingOrder
+    ) {
+      return;
+    }
+
+    setSavingOrder(true);
+    setSaveMessage("");
+    setError("");
+
+    try {
+      let scheduledAt = null;
+
+      if (
+        editingOrder.scheduled_at
+      ) {
+        const date =
+          new Date(
+            editingOrder.scheduled_at
+          );
+
+        if (
+          Number.isNaN(
+            date.getTime()
+          )
+        ) {
+          throw new Error(
+            "Проверьте дату и время записи."
+          );
+        }
+
+        scheduledAt =
+          date.toISOString();
+      }
+
+      const data =
+        await invokeCrmFunction(
+          "crm-update-order",
+          {
+            order_id:
+              selectedOrder.id,
+
+            final_price:
+              editingOrder.final_price ===
+              ""
+                ? null
+                : Number(
+                    editingOrder.final_price
+                  ),
+
+            manager_comment:
+              editingOrder.manager_comment,
+
+            scheduled_at:
+              scheduledAt,
+          }
+        );
+
+      const updated = {
+        ...selectedOrder,
+        ...data.order,
+      };
+
+      setSelectedOrder(
+        updated
+      );
+
+      setOrders(
+        (currentOrders) =>
+          currentOrders.map(
+            (order) =>
+              order.id ===
+              updated.id
+                ? {
+                    ...order,
+                    ...data.order,
+                  }
+                : order
+          )
+      );
+
+      setEditingOrder({
+        final_price:
+          updated.final_price ?? "",
+
+        manager_comment:
+          updated.manager_comment ?? "",
+
+        scheduled_at:
+          getDateTimeLocalValue(
+            updated.scheduled_at
+          ),
+      });
+
+      setSaveMessage(
+        "Изменения сохранены"
+      );
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Не удалось сохранить заказ."
+      );
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
+
+  async function cancelOrder() {
+    if (
+      !selectedOrder ||
+      savingOrder
+    ) {
+      return;
+    }
+
+    const confirmed =
+      window.confirm(
+        `Отменить заказ №${selectedOrder.id}?`
+      );
+
+    if (!confirmed) {
+      return;
+    }
+
+    setSavingOrder(true);
+    setError("");
+    setSaveMessage("");
+
+    try {
+      const data =
+        await invokeCrmFunction(
+          "crm-update-order",
+          {
+            order_id:
+              selectedOrder.id,
+
+            status:
+              "cancelled",
+          }
+        );
+
+      setOrders(
+        (currentOrders) =>
+          currentOrders.map(
+            (order) =>
+              order.id ===
+              selectedOrder.id
+                ? {
+                    ...order,
+                    ...data.order,
+                  }
+                : order
+          )
+      );
+
+      setSelectedOrder(null);
+    } catch (err) {
+      console.error(err);
+
+      setError(
+        err instanceof Error
+          ? err.message
+          : "Не удалось отменить заказ."
+      );
+    } finally {
+      setSavingOrder(false);
+    }
+  }
+
 
   const filteredOrders =
     useMemo(() => {
@@ -410,14 +712,18 @@ export default function CrmApp() {
         (order) => {
           const text = [
             order.id,
+
             getCustomerName(
               order.customer
             ),
+
             order.customer
               ?.phone,
+
             getVehicleName(
               order.vehicle
             ),
+
             order.vehicle
               ?.license_plate,
           ]
@@ -432,6 +738,7 @@ export default function CrmApp() {
       );
     }, [orders, search]);
 
+
   const totalRevenue =
     orders.reduce(
       (sum, order) =>
@@ -444,6 +751,7 @@ export default function CrmApp() {
       0
     );
 
+
   const activeOrders =
     orders.filter(
       (order) =>
@@ -452,6 +760,7 @@ export default function CrmApp() {
           "cancelled",
         ].includes(order.status)
     ).length;
+
 
   if (checkingAuth) {
     return (
@@ -470,6 +779,7 @@ export default function CrmApp() {
       </div>
     );
   }
+
 
   if (!session) {
     return (
@@ -498,12 +808,9 @@ export default function CrmApp() {
             <input
               type="email"
               value={email}
-              onChange={(
-                event
-              ) =>
+              onChange={(event) =>
                 setEmail(
-                  event.target
-                    .value
+                  event.target.value
                 )
               }
               placeholder="manager@company.ru"
@@ -517,12 +824,9 @@ export default function CrmApp() {
             <input
               type="password"
               value={password}
-              onChange={(
-                event
-              ) =>
+              onChange={(event) =>
                 setPassword(
-                  event.target
-                    .value
+                  event.target.value
                 )
               }
               placeholder="••••••••"
@@ -552,9 +856,12 @@ export default function CrmApp() {
     );
   }
 
+
   return (
     <div className="crm">
+
       <aside className="crmSidebar">
+
         <div className="crmBrand crmSidebarBrand">
           Garage<span>
             Flow
@@ -565,7 +872,9 @@ export default function CrmApp() {
           SERVICE CRM
         </div>
 
+
         <nav className="crmMenu">
+
           <button className="crmMenuItem">
             <LayoutDashboard
               size={19}
@@ -615,10 +924,14 @@ export default function CrmApp() {
             />
             Настройки
           </button>
+
         </nav>
 
+
         <div className="crmSidebarBottom">
+
           <div className="crmEmployee">
+
             <div className="crmAvatar">
               <UserRound
                 size={19}
@@ -636,7 +949,9 @@ export default function CrmApp() {
                 {employee?.role}
               </span>
             </div>
+
           </div>
+
 
           <button
             className="crmLogout"
@@ -646,11 +961,16 @@ export default function CrmApp() {
             <LogOut size={18} />
             Выйти
           </button>
+
         </div>
+
       </aside>
 
+
       <main className="crmMain">
+
         <header className="crmTopbar">
+
           <div>
             <h1>
               Заказы
@@ -660,6 +980,7 @@ export default function CrmApp() {
               Управление заявками GarageFlow
             </p>
           </div>
+
 
           <button
             type="button"
@@ -672,9 +993,12 @@ export default function CrmApp() {
             />
             Обновить
           </button>
+
         </header>
 
+
         <section className="crmStats">
+
           <div className="crmStat">
             <span>
               Всего заказов
@@ -685,6 +1009,7 @@ export default function CrmApp() {
             </strong>
           </div>
 
+
           <div className="crmStat">
             <span>
               В работе
@@ -694,6 +1019,7 @@ export default function CrmApp() {
               {activeOrders}
             </strong>
           </div>
+
 
           <div className="crmStat">
             <span>
@@ -711,6 +1037,7 @@ export default function CrmApp() {
             </strong>
           </div>
 
+
           <div className="crmStat">
             <span>
               Сумма заказов
@@ -722,26 +1049,30 @@ export default function CrmApp() {
               )}
             </strong>
           </div>
+
         </section>
 
+
         <section className="crmToolbar">
+
           <div className="crmSearch">
+
             <Search size={18} />
 
             <input
               value={search}
-              onChange={(
-                event
-              ) =>
+              onChange={(event) =>
                 setSearch(
-                  event.target
-                    .value
+                  event.target.value
                 )
               }
               placeholder="Поиск по клиенту, автомобилю, номеру..."
             />
+
           </div>
+
         </section>
+
 
         {error && (
           <div className="crmError crmPageError">
@@ -749,14 +1080,17 @@ export default function CrmApp() {
           </div>
         )}
 
+
         {loading ? (
           <div className="crmLoading">
             Загружаем заказы...
           </div>
         ) : (
           <section className="crmBoard">
+
             {columns.map(
               (column) => {
+
                 const columnOrders =
                   filteredOrders.filter(
                     (order) =>
@@ -771,7 +1105,9 @@ export default function CrmApp() {
                       column.key
                     }
                   >
+
                     <div className="crmColumnHeader">
+
                       <span>
                         {
                           column.label
@@ -783,23 +1119,29 @@ export default function CrmApp() {
                           columnOrders.length
                         }
                       </strong>
+
                     </div>
 
+
                     <div className="crmColumnCards">
+
                       {columnOrders.map(
                         (order) => (
+
                           <article
                             key={
                               order.id
                             }
                             className="crmOrderCard"
                             onClick={() =>
-                              setSelectedOrder(
+                              openOrder(
                                 order
                               )
                             }
                           >
+
                             <div className="crmOrderTop">
+
                               <span>
                                 Заказ №
                                 {
@@ -808,11 +1150,11 @@ export default function CrmApp() {
                               </span>
 
                               <ChevronRight
-                                size={
-                                  17
-                                }
+                                size={17}
                               />
+
                             </div>
+
 
                             <h3>
                               {getVehicleName(
@@ -820,18 +1162,18 @@ export default function CrmApp() {
                               )}
                             </h3>
 
+
                             <p className="crmCustomerName">
                               {getCustomerName(
                                 order.customer
                               )}
                             </p>
 
+
                             <div className="crmServices">
                               {order.items
                                 ?.map(
-                                  (
-                                    item
-                                  ) =>
+                                  (item) =>
                                     item.service_name
                                 )
                                 .join(
@@ -839,7 +1181,21 @@ export default function CrmApp() {
                                 )}
                             </div>
 
+
+                            {order.scheduled_at && (
+                              <div className="crmOrderSchedule">
+                                <Clock3
+                                  size={14}
+                                />
+                                {formatDate(
+                                  order.scheduled_at
+                                )}
+                              </div>
+                            )}
+
+
                             <div className="crmOrderBottom">
+
                               <strong>
                                 {formatPrice(
                                   order.final_price ??
@@ -852,10 +1208,13 @@ export default function CrmApp() {
                                   order.created_at
                                 )}
                               </span>
+
                             </div>
+
                           </article>
                         )
                       )}
+
 
                       {columnOrders.length ===
                         0 && (
@@ -863,16 +1222,22 @@ export default function CrmApp() {
                           Нет заказов
                         </div>
                       )}
+
                     </div>
+
                   </div>
                 );
               }
             )}
+
           </section>
         )}
+
       </main>
 
+
       {selectedOrder && (
+
         <div
           className="crmModalBackdrop"
           onClick={() =>
@@ -881,14 +1246,14 @@ export default function CrmApp() {
             )
           }
         >
+
           <div
             className="crmModal"
-            onClick={(
-              event
-            ) =>
+            onClick={(event) =>
               event.stopPropagation()
             }
           >
+
             <button
               className="crmModalClose"
               type="button"
@@ -901,10 +1266,12 @@ export default function CrmApp() {
               <X size={21} />
             </button>
 
+
             <div className="crmOrderNumber">
               ЗАКАЗ №
               {selectedOrder.id}
             </div>
+
 
             <h2>
               {getVehicleName(
@@ -912,7 +1279,9 @@ export default function CrmApp() {
               )}
             </h2>
 
+
             <p className="crmModalCustomer">
+
               {getCustomerName(
                 selectedOrder.customer
               )}
@@ -920,9 +1289,12 @@ export default function CrmApp() {
               {selectedOrder
                 .customer?.phone &&
                 ` · ${selectedOrder.customer.phone}`}
+
             </p>
 
+
             <div className="crmModalSection">
+
               <span className="crmModalLabel">
                 Текущий статус
               </span>
@@ -931,26 +1303,33 @@ export default function CrmApp() {
                 {
                   statusLabels[
                     selectedOrder.status
-                  ]
+                  ] ||
+                  selectedOrder.status
                 }
               </strong>
+
             </div>
 
+
             <div className="crmModalSection">
+
               <span className="crmModalLabel">
                 Изменить статус
               </span>
 
               <div className="crmStatusButtons">
+
                 {columns.map(
                   (column) => (
+
                     <button
                       key={
                         column.key
                       }
                       type="button"
                       disabled={
-                        changingStatus
+                        changingStatus ||
+                        savingOrder
                       }
                       className={
                         selectedOrder.status ===
@@ -965,39 +1344,48 @@ export default function CrmApp() {
                         )
                       }
                     >
+
                       {selectedOrder.status ===
                         column.key && (
                         <CheckCircle2
-                          size={
-                            15
-                          }
+                          size={15}
                         />
                       )}
 
                       {
                         column.label
                       }
+
                     </button>
+
                   )
                 )}
+
               </div>
+
             </div>
 
+
             <div className="crmModalSection">
+
               <span className="crmModalLabel">
                 Работы
               </span>
 
               <div className="crmModalItems">
+
                 {selectedOrder.items?.map(
                   (item) => (
+
                     <div
                       key={
                         item.id
                       }
                       className="crmModalItem"
                     >
+
                       <div>
+
                         <strong>
                           {
                             item.service_name
@@ -1011,6 +1399,7 @@ export default function CrmApp() {
                             }
                           </span>
                         )}
+
                       </div>
 
                       <strong>
@@ -1018,27 +1407,143 @@ export default function CrmApp() {
                           item.price
                         )}
                       </strong>
+
                     </div>
+
                   )
                 )}
+
               </div>
+
             </div>
 
-            {selectedOrder.customer_comment && (
+
+            {selectedOrder
+              .customer_comment && (
+
               <div className="crmModalSection">
+
                 <span className="crmModalLabel">
                   Комментарий клиента
                 </span>
 
                 <p>
                   {
-                    selectedOrder.customer_comment
+                    selectedOrder
+                      .customer_comment
                   }
                 </p>
+
               </div>
             )}
 
+
+            <div className="crmModalSection">
+
+              <span className="crmModalLabel">
+                Дата и время записи
+              </span>
+
+              <input
+                className="crmEditInput"
+                type="datetime-local"
+                value={
+                  editingOrder.scheduled_at
+                }
+                onChange={(event) =>
+                  setEditingOrder(
+                    (current) => ({
+                      ...current,
+                      scheduled_at:
+                        event.target.value,
+                    })
+                  )
+                }
+              />
+
+            </div>
+
+
+            <div className="crmModalSection">
+
+              <span className="crmModalLabel">
+                Итоговая стоимость
+              </span>
+
+              <div className="crmPriceInputWrap">
+
+                <input
+                  className="crmEditInput"
+                  type="number"
+                  min="0"
+                  step="1"
+                  value={
+                    editingOrder.final_price
+                  }
+                  onChange={(event) =>
+                    setEditingOrder(
+                      (current) => ({
+                        ...current,
+                        final_price:
+                          event.target.value,
+                      })
+                    )
+                  }
+                  placeholder="Например, 52000"
+                />
+
+                <span>
+                  ₽
+                </span>
+
+              </div>
+
+            </div>
+
+
+            <div className="crmModalSection">
+
+              <span className="crmModalLabel">
+                Комментарий менеджера
+              </span>
+
+              <textarea
+                className="crmEditTextarea"
+                value={
+                  editingOrder.manager_comment
+                }
+                onChange={(event) =>
+                  setEditingOrder(
+                    (current) => ({
+                      ...current,
+                      manager_comment:
+                        event.target.value,
+                    })
+                  )
+                }
+                placeholder="Например: клиент согласовал дополнительную защиту арок"
+                rows={4}
+              />
+
+            </div>
+
+
+            {saveMessage && (
+
+              <div className="crmSaveSuccess">
+
+                <CheckCircle2
+                  size={17}
+                />
+
+                {saveMessage}
+
+              </div>
+            )}
+
+
             <div className="crmModalTotal">
+
               <span>
                 Стоимость
               </span>
@@ -1049,20 +1554,69 @@ export default function CrmApp() {
                     selectedOrder.preliminary_price
                 )}
               </strong>
+
             </div>
 
+
             <div className="crmModalDate">
+
               <Clock3 size={16} />
 
               Создан{" "}
               {formatDate(
                 selectedOrder.created_at
               )}
+
             </div>
+
+
+            <div className="crmModalActions">
+
+              <button
+                type="button"
+                className="crmSaveButton"
+                disabled={
+                  savingOrder ||
+                  changingStatus
+                }
+                onClick={
+                  saveOrderChanges
+                }
+              >
+                {savingOrder
+                  ? "Сохраняем..."
+                  : "Сохранить изменения"}
+              </button>
+
+
+              <button
+                type="button"
+                className="crmCancelButton"
+                disabled={
+                  savingOrder ||
+                  changingStatus ||
+                  selectedOrder.status ===
+                    "cancelled"
+                }
+                onClick={
+                  cancelOrder
+                }
+              >
+                {selectedOrder.status ===
+                "cancelled"
+                  ? "Заказ отменён"
+                  : "Отменить заказ"}
+              </button>
+
+            </div>
+
           </div>
+
         </div>
       )}
+
     </div>
   );
 }
+
 
