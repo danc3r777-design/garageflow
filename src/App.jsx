@@ -1,4 +1,8 @@
-import React, { useEffect, useState } from "react";
+import React, {
+  useEffect,
+  useState,
+} from "react";
+
 import { supabase } from "./supabase.js";
 
 import {
@@ -13,6 +17,8 @@ import {
   MessageSquare,
   CircleCheckBig,
   LoaderCircle,
+  Clock3,
+  CalendarDays,
 } from "lucide-react";
 
 const materialOptions = {
@@ -29,120 +35,281 @@ const materialOptions = {
   ],
 };
 
+const statusInfo = {
+  new: {
+    label: "Новая заявка",
+    icon: "🔵",
+  },
+
+  approval: {
+    label: "Согласование",
+    icon: "🟡",
+  },
+
+  production: {
+    label: "Производство",
+    icon: "🟠",
+  },
+
+  installation: {
+    label: "Установка",
+    icon: "🟣",
+  },
+
+  done: {
+    label: "Готово",
+    icon: "🟢",
+  },
+};
+
 function formatPrice(price) {
   return (
-    new Intl.NumberFormat("ru-RU").format(price) + " ₽"
+    new Intl.NumberFormat(
+      "ru-RU"
+    ).format(Number(price || 0)) +
+    " ₽"
   );
 }
 
-export default function App() {
-  const [services, setServices] = useState([]);
-  const [loading, setLoading] = useState(true);
+function formatDate(date) {
+  if (!date) {
+    return "";
+  }
 
-  const [selectedMaterials, setSelectedMaterials] =
-    useState({});
+  return new Intl.DateTimeFormat(
+    "ru-RU",
+    {
+      day: "numeric",
+      month: "long",
+      year: "numeric",
+    }
+  ).format(new Date(date));
+}
+
+function vehicleName(vehicle) {
+  if (!vehicle) {
+    return "Автомобиль";
+  }
+
+  return [
+    vehicle.brand,
+    vehicle.model,
+    vehicle.configuration,
+  ]
+    .filter(Boolean)
+    .join(" ");
+}
+
+export default function App() {
+  const [services, setServices] =
+    useState([]);
+
+  const [loading, setLoading] =
+    useState(true);
+
+  const [
+    selectedMaterials,
+    setSelectedMaterials,
+  ] = useState({});
 
   const [screen, setScreen] =
     useState("configurator");
 
-  const [comment, setComment] = useState("");
-
-  const [creatingOrder, setCreatingOrder] =
-    useState(false);
-
-  const [orderError, setOrderError] =
+  const [comment, setComment] =
     useState("");
 
-  const [createdOrder, setCreatedOrder] =
-    useState(null);
+  const [
+    creatingOrder,
+    setCreatingOrder,
+  ] = useState(false);
+
+  const [
+    orderError,
+    setOrderError,
+  ] = useState("");
+
+  const [
+    createdOrder,
+    setCreatedOrder,
+  ] = useState(null);
+
+  const [orders, setOrders] =
+    useState([]);
+
+  const [
+    ordersLoading,
+    setOrdersLoading,
+  ] = useState(false);
+
+  const [
+    ordersError,
+    setOrdersError,
+  ] = useState("");
+
+  const [
+    selectedOrder,
+    setSelectedOrder,
+  ] = useState(null);
 
   /*
-    Пока это DEMO-пользователь.
+    ВРЕМЕННЫЙ DEMO-ПОЛЬЗОВАТЕЛЬ.
 
-    Позже customer_id и vehicle_id
-    будут определяться автоматически
-    через Telegram.
+    Позже заменим это
+    Telegram-пользователем.
   */
 
   const DEMO_CUSTOMER_ID = 1;
   const DEMO_VEHICLE_ID = 1;
 
   useEffect(() => {
-    async function loadServices() {
-      setLoading(true);
+    loadServices();
+  }, []);
 
-      const { data, error } = await supabase
+  async function loadServices() {
+    setLoading(true);
+
+    const { data, error } =
+      await supabase
         .from("services")
         .select("*")
         .eq("is_active", true)
         .order("id");
 
-      if (error) {
-        console.error(
-          "Ошибка загрузки услуг:",
-          error
-        );
-      } else {
-        const servicesWithSelection =
-          (data || []).map((service) => ({
+    if (error) {
+      console.error(
+        "Ошибка загрузки услуг:",
+        error
+      );
+    } else {
+      setServices(
+        (data || []).map(
+          (service) => ({
             ...service,
-            price: Number(service.base_price),
+
+            price: Number(
+              service.base_price
+            ),
+
             selected: false,
-          }));
-
-        setServices(servicesWithSelection);
-      }
-
-      setLoading(false);
+          })
+        )
+      );
     }
 
-    loadServices();
-  }, []);
+    setLoading(false);
+  }
+
+  async function loadOrders() {
+    setOrdersLoading(true);
+    setOrdersError("");
+
+    try {
+      const { data, error } =
+        await supabase.functions.invoke(
+          "get-orders",
+          {
+            body: {
+              customer_id:
+                DEMO_CUSTOMER_ID,
+            },
+          }
+        );
+
+      if (error) {
+        console.error(
+          "Ошибка get-orders:",
+          error
+        );
+
+        throw new Error(
+          "Не удалось загрузить заказы."
+        );
+      }
+
+      if (!data?.success) {
+        throw new Error(
+          data?.error ||
+            "Не удалось загрузить заказы."
+        );
+      }
+
+      setOrders(data.orders || []);
+    } catch (error) {
+      console.error(error);
+
+      setOrdersError(
+        error instanceof Error
+          ? error.message
+          : "Ошибка загрузки заказов."
+      );
+    } finally {
+      setOrdersLoading(false);
+    }
+  }
 
   function toggleService(serviceId) {
-    setServices((currentServices) =>
-      currentServices.map((service) => {
-        if (service.id !== serviceId) {
-          return service;
-        }
-
-        const willBeSelected =
-          !service.selected;
-
-        if (
-          willBeSelected &&
-          materialOptions[service.name]
-        ) {
-          setSelectedMaterials(
-            (currentMaterials) => ({
-              ...currentMaterials,
-
-              [service.id]:
-                currentMaterials[service.id] ||
-                materialOptions[service.name][0],
-            })
-          );
-        }
-
-        if (!willBeSelected) {
-          setSelectedMaterials(
-            (currentMaterials) => {
-              const newMaterials = {
-                ...currentMaterials,
-              };
-
-              delete newMaterials[service.id];
-
-              return newMaterials;
+    setServices(
+      (currentServices) =>
+        currentServices.map(
+          (service) => {
+            if (
+              service.id !==
+              serviceId
+            ) {
+              return service;
             }
-          );
-        }
 
-        return {
-          ...service,
-          selected: willBeSelected,
-        };
-      })
+            const willBeSelected =
+              !service.selected;
+
+            if (
+              willBeSelected &&
+              materialOptions[
+                service.name
+              ]
+            ) {
+              setSelectedMaterials(
+                (
+                  currentMaterials
+                ) => ({
+                  ...currentMaterials,
+
+                  [service.id]:
+                    currentMaterials[
+                      service.id
+                    ] ||
+                    materialOptions[
+                      service.name
+                    ][0],
+                })
+              );
+            }
+
+            if (!willBeSelected) {
+              setSelectedMaterials(
+                (
+                  currentMaterials
+                ) => {
+                  const next = {
+                    ...currentMaterials,
+                  };
+
+                  delete next[
+                    service.id
+                  ];
+
+                  return next;
+                }
+              );
+            }
+
+            return {
+              ...service,
+              selected:
+                willBeSelected,
+            };
+          }
+        )
     );
   }
 
@@ -151,8 +318,8 @@ export default function App() {
     material
   ) {
     setSelectedMaterials(
-      (currentMaterials) => ({
-        ...currentMaterials,
+      (current) => ({
+        ...current,
         [serviceId]: material,
       })
     );
@@ -160,7 +327,8 @@ export default function App() {
 
   const selectedServices =
     services.filter(
-      (service) => service.selected
+      (service) =>
+        service.selected
     );
 
   const total =
@@ -179,7 +347,8 @@ export default function App() {
 
   function openReview() {
     if (
-      selectedServices.length === 0
+      selectedServices.length ===
+      0
     ) {
       return;
     }
@@ -189,18 +358,35 @@ export default function App() {
     goToTop();
   }
 
-  function backToConfigurator() {
-    setOrderError("");
+  function openConfigurator() {
+    setSelectedOrder(null);
     setScreen("configurator");
     goToTop();
   }
 
+  async function openOrders() {
+    setSelectedOrder(null);
+    setScreen("orders");
+    goToTop();
+
+    await loadOrders();
+  }
+
+  function openOrder(order) {
+    setSelectedOrder(order);
+    setScreen("order-details");
+    goToTop();
+  }
+
   function resetOrder() {
-    setServices((currentServices) =>
-      currentServices.map((service) => ({
-        ...service,
-        selected: false,
-      }))
+    setServices(
+      (currentServices) =>
+        currentServices.map(
+          (service) => ({
+            ...service,
+            selected: false,
+          })
+        )
     );
 
     setSelectedMaterials({});
@@ -208,6 +394,7 @@ export default function App() {
     setCreatedOrder(null);
     setOrderError("");
     setCreatingOrder(false);
+
     setScreen("configurator");
 
     goToTop();
@@ -219,7 +406,8 @@ export default function App() {
     }
 
     if (
-      selectedServices.length === 0
+      selectedServices.length ===
+      0
     ) {
       setOrderError(
         "Выберите хотя бы одну услугу."
@@ -235,7 +423,8 @@ export default function App() {
       const orderServices =
         selectedServices.map(
           (service) => ({
-            service_id: service.id,
+            service_id:
+              service.id,
 
             material:
               selectedMaterials[
@@ -266,7 +455,7 @@ export default function App() {
 
       if (error) {
         console.error(
-          "Ошибка Edge Function:",
+          "Ошибка create-order:",
           error
         );
 
@@ -284,31 +473,582 @@ export default function App() {
 
       setCreatedOrder({
         id: data.order_id,
-        total: Number(data.total),
+        total: Number(
+          data.total
+        ),
       });
 
       setScreen("success");
 
       goToTop();
     } catch (error) {
-      console.error(
-        "Ошибка создания заказа:",
-        error
-      );
+      console.error(error);
 
       setOrderError(
         error instanceof Error
           ? error.message
-          : "Произошла ошибка при создании заявки."
+          : "Произошла ошибка."
       );
     } finally {
       setCreatingOrder(false);
     }
   }
 
+  function BottomNav({
+    active,
+  }) {
+    return (
+      <nav className="bottomNav">
+        <button
+          className={
+            active ===
+            "configurator"
+              ? "navItem activeNav"
+              : "navItem"
+          }
+          type="button"
+          onClick={
+            openConfigurator
+          }
+        >
+          <SlidersHorizontal
+            size={21}
+          />
+
+          <span>
+            Конфигуратор
+          </span>
+        </button>
+
+        <button
+          className={
+            active === "orders"
+              ? "navItem activeNav"
+              : "navItem"
+          }
+          type="button"
+          onClick={openOrders}
+        >
+          <ClipboardList
+            size={21}
+          />
+
+          <span>
+            Заказы
+          </span>
+        </button>
+
+        <button
+          className="navItem"
+          type="button"
+        >
+          <Car size={21} />
+
+          <span>
+            Автомобиль
+          </span>
+        </button>
+
+        <button
+          className="navItem"
+          type="button"
+        >
+          <Headphones
+            size={21}
+          />
+
+          <span>
+            Поддержка
+          </span>
+        </button>
+      </nav>
+    );
+  }
+
   /*
-    ЭКРАН УСПЕШНОГО
-    СОЗДАНИЯ ЗАКАЗА
+    ДЕТАЛИ ОДНОГО ЗАКАЗА
+  */
+
+  if (
+    screen ===
+      "order-details" &&
+    selectedOrder
+  ) {
+    const status =
+      statusInfo[
+        selectedOrder.status
+      ] || {
+        label:
+          selectedOrder.status,
+        icon: "⚪",
+      };
+
+    return (
+      <div className="app">
+        <header className="header">
+          <div>
+            <div className="logo">
+              Garage<span>
+                Flow
+              </span>
+            </div>
+
+            <div className="subtitle">
+              Заказ №
+              {selectedOrder.id}
+            </div>
+          </div>
+        </header>
+
+        <main>
+          <button
+            type="button"
+            className="linkButton"
+            onClick={openOrders}
+          >
+            <ChevronLeft
+              size={18}
+            />
+            Все заказы
+          </button>
+
+          <section
+            className="vehicleCard"
+            style={{
+              marginTop: "18px",
+            }}
+          >
+            <div className="vehicleLabel">
+              ЗАКАЗ №
+              {selectedOrder.id}
+            </div>
+
+            <h1
+              style={{
+                marginTop: "8px",
+              }}
+            >
+              {vehicleName(
+                selectedOrder.vehicle
+              )}
+            </h1>
+
+            <p>
+              {formatDate(
+                selectedOrder.created_at
+              )}
+            </p>
+
+            <div
+              style={{
+                marginTop: "18px",
+                padding: "12px 14px",
+                borderRadius: "14px",
+                background: "#f1f5fa",
+                fontWeight: "700",
+              }}
+            >
+              {status.icon}{" "}
+              {status.label}
+            </div>
+          </section>
+
+          <section className="section">
+            <div className="sectionHeader">
+              <div>
+                <h2>
+                  Работы
+                </h2>
+
+                <p>
+                  Состав заявки
+                </p>
+              </div>
+
+              <ClipboardList
+                size={22}
+              />
+            </div>
+
+            <div className="serviceList">
+              {selectedOrder.items?.map(
+                (item) => (
+                  <div
+                    className="serviceCard"
+                    key={item.id}
+                  >
+                    <div className="serviceContent">
+                      <div>
+                        <h3>
+                          {
+                            item.service_name
+                          }
+                        </h3>
+
+                        {item.material && (
+                          <p>
+                            Материал:{" "}
+                            {
+                              item.material
+                            }
+                          </p>
+                        )}
+                      </div>
+
+                      <strong>
+                        {formatPrice(
+                          item.price
+                        )}
+                      </strong>
+                    </div>
+                  </div>
+                )
+              )}
+            </div>
+          </section>
+
+          {selectedOrder.customer_comment && (
+            <section className="section">
+              <div className="sectionHeader">
+                <div>
+                  <h2>
+                    Комментарий
+                  </h2>
+                </div>
+
+                <MessageSquare
+                  size={22}
+                />
+              </div>
+
+              <div className="serviceCard">
+                <p
+                  style={{
+                    lineHeight: "1.5",
+                  }}
+                >
+                  {
+                    selectedOrder.customer_comment
+                  }
+                </p>
+              </div>
+            </section>
+          )}
+
+          {selectedOrder.scheduled_at && (
+            <section className="section">
+              <div className="serviceCard">
+                <div className="serviceContent">
+                  <div>
+                    <h3>
+                      Запись
+                    </h3>
+
+                    <p>
+                      {formatDate(
+                        selectedOrder.scheduled_at
+                      )}
+                    </p>
+                  </div>
+
+                  <CalendarDays
+                    size={25}
+                  />
+                </div>
+              </div>
+            </section>
+          )}
+
+          <section
+            className="section"
+            style={{
+              marginBottom:
+                "25px",
+            }}
+          >
+            <div className="vehicleCard">
+              <div
+                style={{
+                  color: "#7e899a",
+                  fontSize: "13px",
+                }}
+              >
+                Стоимость
+              </div>
+
+              <strong
+                style={{
+                  display: "block",
+                  fontSize: "30px",
+                  marginTop: "5px",
+                }}
+              >
+                {formatPrice(
+                  selectedOrder.final_price ??
+                    selectedOrder.preliminary_price
+                )}
+              </strong>
+            </div>
+          </section>
+        </main>
+
+        <BottomNav active="orders" />
+      </div>
+    );
+  }
+
+  /*
+    СПИСОК ЗАКАЗОВ
+  */
+
+  if (screen === "orders") {
+    return (
+      <div className="app">
+        <header className="header">
+          <div>
+            <div className="logo">
+              Garage<span>
+                Flow
+              </span>
+            </div>
+
+            <div className="subtitle">
+              История заявок
+            </div>
+          </div>
+
+          <button
+            className="iconButton"
+            type="button"
+          >
+            <Bell size={23} />
+          </button>
+        </header>
+
+        <main>
+          <section className="section">
+            <div className="sectionHeader">
+              <div>
+                <h2>
+                  Мои заказы
+                </h2>
+
+                <p>
+                  Все ваши заявки
+                </p>
+              </div>
+
+              <ClipboardList
+                size={22}
+              />
+            </div>
+
+            {ordersLoading && (
+              <div
+                className="serviceCard"
+                style={{
+                  textAlign:
+                    "center",
+                }}
+              >
+                <LoaderCircle
+                  size={25}
+                />
+
+                <p
+                  style={{
+                    marginTop:
+                      "8px",
+                  }}
+                >
+                  Загружаем заказы...
+                </p>
+              </div>
+            )}
+
+            {ordersError && (
+              <div
+                className="serviceCard"
+                style={{
+                  color:
+                    "#c62828",
+                }}
+              >
+                {ordersError}
+              </div>
+            )}
+
+            {!ordersLoading &&
+              !ordersError &&
+              orders.length ===
+                0 && (
+                <div
+                  className="serviceCard"
+                  style={{
+                    textAlign:
+                      "center",
+                    padding:
+                      "30px 20px",
+                  }}
+                >
+                  <ClipboardList
+                    size={42}
+                    style={{
+                      color:
+                        "#8793a5",
+                    }}
+                  />
+
+                  <h3>
+                    Заказов пока нет
+                  </h3>
+
+                  <p>
+                    Создайте первую
+                    заявку в
+                    конфигураторе.
+                  </p>
+                </div>
+              )}
+
+            <div className="serviceList">
+              {orders.map(
+                (order) => {
+                  const status =
+                    statusInfo[
+                      order.status
+                    ] || {
+                      label:
+                        order.status,
+                      icon: "⚪",
+                    };
+
+                  return (
+                    <div
+                      key={order.id}
+                      className="serviceCard"
+                      onClick={() =>
+                        openOrder(
+                          order
+                        )
+                      }
+                      style={{
+                        cursor:
+                          "pointer",
+                      }}
+                    >
+                      <div className="serviceContent">
+                        <div>
+                          <div
+                            className="vehicleLabel"
+                            style={{
+                              marginBottom:
+                                "5px",
+                            }}
+                          >
+                            ЗАКАЗ №
+                            {order.id}
+                          </div>
+
+                          <h3>
+                            {vehicleName(
+                              order.vehicle
+                            )}
+                          </h3>
+
+                          <strong>
+                            {formatPrice(
+                              order.final_price ??
+                                order.preliminary_price
+                            )}
+                          </strong>
+
+                          <p>
+                            {
+                              status.icon
+                            }{" "}
+                            {
+                              status.label
+                            }
+                          </p>
+                        </div>
+
+                        <ChevronRight
+                          size={23}
+                        />
+                      </div>
+
+                      <div
+                        style={{
+                          marginTop:
+                            "14px",
+                          paddingTop:
+                            "12px",
+                          borderTop:
+                            "1px solid #edf0f4",
+                        }}
+                      >
+                        <div
+                          style={{
+                            fontSize:
+                              "13px",
+                            color:
+                              "#66758b",
+                            lineHeight:
+                              "1.5",
+                          }}
+                        >
+                          {order.items
+                            ?.map(
+                              (
+                                item
+                              ) =>
+                                item.service_name
+                            )
+                            .join(
+                              " • "
+                            )}
+                        </div>
+
+                        <div
+                          style={{
+                            display:
+                              "flex",
+                            alignItems:
+                              "center",
+                            gap: "5px",
+                            marginTop:
+                              "8px",
+                            color:
+                              "#8a95a6",
+                            fontSize:
+                              "12px",
+                          }}
+                        >
+                          <Clock3
+                            size={14}
+                          />
+
+                          {formatDate(
+                            order.created_at
+                          )}
+                        </div>
+                      </div>
+                    </div>
+                  );
+                }
+              )}
+            </div>
+          </section>
+        </main>
+
+        <BottomNav active="orders" />
+      </div>
+    );
+  }
+
+  /*
+    УСПЕШНОЕ СОЗДАНИЕ
   */
 
   if (
@@ -320,7 +1060,9 @@ export default function App() {
         <header className="header">
           <div>
             <div className="logo">
-              Garage<span>Flow</span>
+              Garage<span>
+                Flow
+              </span>
             </div>
 
             <div className="subtitle">
@@ -343,14 +1085,16 @@ export default function App() {
               strokeWidth={1.7}
               style={{
                 color: "#1672f3",
-                marginBottom: "15px",
+                marginBottom:
+                  "15px",
               }}
             />
 
             <div
               className="vehicleLabel"
               style={{
-                marginBottom: "8px",
+                marginBottom:
+                  "8px",
               }}
             >
               ЗАЯВКА СОЗДАНА
@@ -359,45 +1103,49 @@ export default function App() {
             <h1
               style={{
                 fontSize: "30px",
-                marginBottom: "8px",
               }}
             >
-              Заказ №{createdOrder.id}
+              Заказ №
+              {createdOrder.id}
             </h1>
 
-            <p
-              style={{
-                fontSize: "15px",
-                lineHeight: "1.5",
-              }}
-            >
-              Мы получили вашу заявку.
-              Менеджер сможет увидеть её
-              в GarageFlow CRM.
+            <p>
+              Мы получили вашу
+              заявку. Менеджер
+              сможет увидеть её в
+              GarageFlow CRM.
             </p>
 
             <div
               style={{
                 marginTop: "25px",
                 padding: "18px",
-                borderRadius: "16px",
-                background: "#f4f7fb",
+                borderRadius:
+                  "16px",
+                background:
+                  "#f4f7fb",
               }}
             >
               <div
                 style={{
-                  color: "#7e899a",
-                  fontSize: "13px",
+                  color:
+                    "#7e899a",
+                  fontSize:
+                    "13px",
                 }}
               >
-                Предварительная стоимость
+                Предварительная
+                стоимость
               </div>
 
               <strong
                 style={{
-                  display: "block",
-                  marginTop: "4px",
-                  fontSize: "30px",
+                  display:
+                    "block",
+                  marginTop:
+                    "4px",
+                  fontSize:
+                    "30px",
                 }}
               >
                 {formatPrice(
@@ -409,89 +1157,45 @@ export default function App() {
             <button
               type="button"
               className="continueButton"
+              onClick={openOrders}
+              style={{
+                width: "100%",
+                justifyContent:
+                  "center",
+                marginTop:
+                  "25px",
+              }}
+            >
+              Мои заказы
+              <ChevronRight
+                size={20}
+              />
+            </button>
+
+            <button
+              type="button"
+              className="linkButton"
               onClick={resetOrder}
               style={{
                 width: "100%",
-                justifyContent: "center",
-                marginTop: "25px",
+                justifyContent:
+                  "center",
+                marginTop:
+                  "18px",
               }}
             >
               Новый заказ
-              <ChevronRight size={20} />
             </button>
-          </section>
-
-          <section className="section">
-            <div className="serviceCard">
-              <div className="serviceContent">
-                <div>
-                  <h3>
-                    Ford Transit L3H2
-                  </h3>
-
-                  <p>
-                    Автомобиль заявки
-                  </p>
-                </div>
-
-                <Car size={27} />
-              </div>
-            </div>
           </section>
         </main>
 
-        <nav className="bottomNav">
-          <button
-            className="navItem"
-            type="button"
-            onClick={resetOrder}
-          >
-            <SlidersHorizontal
-              size={21}
-            />
-            <span>
-              Конфигуратор
-            </span>
-          </button>
-
-          <button
-            className="navItem activeNav"
-            type="button"
-          >
-            <ClipboardList
-              size={21}
-            />
-            <span>
-              Заказы
-            </span>
-          </button>
-
-          <button
-            className="navItem"
-            type="button"
-          >
-            <Car size={21} />
-            <span>
-              Автомобиль
-            </span>
-          </button>
-
-          <button
-            className="navItem"
-            type="button"
-          >
-            <Headphones size={21} />
-            <span>
-              Поддержка
-            </span>
-          </button>
-        </nav>
+        <BottomNav active="orders" />
       </div>
     );
   }
 
   /*
-    ЭКРАН ПРОВЕРКИ ЗАКАЗА
+    ПРОВЕРКА ЗАКАЗА
   */
 
   if (screen === "review") {
@@ -500,59 +1204,49 @@ export default function App() {
         <header className="header">
           <div>
             <div className="logo">
-              Garage<span>Flow</span>
+              Garage<span>
+                Flow
+              </span>
             </div>
 
             <div className="subtitle">
               Подтверждение заявки
             </div>
           </div>
-
-          <button
-            className="iconButton"
-            type="button"
-          >
-            <Bell size={23} />
-            <span className="notificationDot" />
-          </button>
         </header>
 
         <main>
           <button
-            type="button"
             className="linkButton"
+            type="button"
             onClick={
-              backToConfigurator
+              openConfigurator
             }
-            style={{
-              marginTop: "4px",
-              marginBottom: "18px",
-            }}
           >
-            <ChevronLeft size={18} />
-            Вернуться к конфигуратору
+            <ChevronLeft
+              size={18}
+            />
+            Вернуться
           </button>
 
-          <section className="vehicleCard">
-            <div className="vehicleTop">
-              <div>
-                <div className="vehicleLabel">
-                  ВАШ АВТОМОБИЛЬ
-                </div>
-
-                <h1>
-                  Ford Transit L3H2
-                </h1>
-
-                <p>
-                  2023 · Передний привод
-                </p>
-              </div>
-
-              <div className="vanIcon">
-                🚐
-              </div>
+          <section
+            className="vehicleCard"
+            style={{
+              marginTop: "18px",
+            }}
+          >
+            <div className="vehicleLabel">
+              ВАШ АВТОМОБИЛЬ
             </div>
+
+            <h1>
+              Ford Transit L3H2
+            </h1>
+
+            <p>
+              2023 · Передний
+              привод
+            </p>
           </section>
 
           <section className="section">
@@ -563,7 +1257,7 @@ export default function App() {
                 </h2>
 
                 <p>
-                  Проверьте выбранные работы
+                  Проверьте работы
                 </p>
               </div>
 
@@ -582,49 +1276,26 @@ export default function App() {
                     <div className="serviceContent">
                       <div>
                         <h3>
-                          {service.name}
+                          {
+                            service.name
+                          }
                         </h3>
 
                         {selectedMaterials[
                           service.id
                         ] && (
-                          <p
-                            style={{
-                              marginBottom:
-                                "7px",
-                            }}
-                          >
+                          <p>
                             Материал:{" "}
-                            <strong
-                              style={{
-                                display:
-                                  "inline",
-                              }}
-                            >
-                              {
-                                selectedMaterials[
-                                  service.id
-                                ]
-                              }
-                            </strong>
+                            {
+                              selectedMaterials[
+                                service.id
+                              ]
+                            }
                           </p>
                         )}
-
-                        <p>
-                          {
-                            service.description
-                          }
-                        </p>
                       </div>
 
-                      <strong
-                        style={{
-                          whiteSpace:
-                            "nowrap",
-                          fontSize:
-                            "16px",
-                        }}
-                      >
+                      <strong>
                         {formatPrice(
                           service.price
                         )}
@@ -656,24 +1327,25 @@ export default function App() {
             <div className="serviceCard">
               <textarea
                 value={comment}
-                onChange={(event) =>
+                onChange={(
+                  event
+                ) =>
                   setComment(
-                    event.target.value
+                    event.target
+                      .value
                   )
                 }
-                placeholder="Например: нужна дополнительная защита пола, позвоните после 18:00..."
+                placeholder="Комментарий к заявке..."
                 rows={5}
                 style={{
                   width: "100%",
                   border: "none",
                   outline: "none",
-                  resize: "vertical",
+                  resize:
+                    "vertical",
                   font: "inherit",
-                  fontSize: "15px",
-                  color: "#0f1d36",
                   background:
                     "transparent",
-                  lineHeight: "1.5",
                 }}
               />
             </div>
@@ -682,90 +1354,21 @@ export default function App() {
           {orderError && (
             <div
               style={{
-                marginTop: "18px",
-                padding: "14px 16px",
-                borderRadius: "14px",
-                background: "#fff1f1",
-                color: "#c62828",
-                fontSize: "14px",
-                lineHeight: "1.4",
+                marginTop:
+                  "18px",
+                padding:
+                  "14px",
+                background:
+                  "#fff1f1",
+                color:
+                  "#c62828",
+                borderRadius:
+                  "14px",
               }}
             >
               {orderError}
             </div>
           )}
-
-          <section
-            className="section"
-            style={{
-              marginBottom: "25px",
-            }}
-          >
-            <div
-              className="vehicleCard"
-              style={{
-                padding: "18px 20px",
-              }}
-            >
-              <div
-                style={{
-                  display: "flex",
-                  justifyContent:
-                    "space-between",
-                  alignItems: "center",
-                  gap: "15px",
-                }}
-              >
-                <div>
-                  <div
-                    style={{
-                      color: "#7e899a",
-                      fontSize: "13px",
-                    }}
-                  >
-                    Выбрано работ
-                  </div>
-
-                  <strong
-                    style={{
-                      display: "block",
-                      fontSize: "18px",
-                      marginTop: "3px",
-                    }}
-                  >
-                    {
-                      selectedServices.length
-                    }
-                  </strong>
-                </div>
-
-                <div
-                  style={{
-                    textAlign: "right",
-                  }}
-                >
-                  <div
-                    style={{
-                      color: "#7e899a",
-                      fontSize: "13px",
-                    }}
-                  >
-                    Предварительная стоимость
-                  </div>
-
-                  <strong
-                    style={{
-                      display: "block",
-                      fontSize: "25px",
-                      marginTop: "3px",
-                    }}
-                  >
-                    {formatPrice(total)}
-                  </strong>
-                </div>
-              </div>
-            </div>
-          </section>
         </main>
 
         <div className="totalBar">
@@ -783,18 +1386,9 @@ export default function App() {
             className="continueButton"
             type="button"
             onClick={submitOrder}
-            disabled={creatingOrder}
-            style={{
-              opacity:
-                creatingOrder
-                  ? 0.7
-                  : 1,
-
-              cursor:
-                creatingOrder
-                  ? "default"
-                  : "pointer",
-            }}
+            disabled={
+              creatingOrder
+            }
           >
             {creatingOrder ? (
               <>
@@ -805,7 +1399,7 @@ export default function App() {
               </>
             ) : (
               <>
-                Оформить заявку
+                Оформить
                 <ChevronRight
                   size={20}
                 />
@@ -814,62 +1408,12 @@ export default function App() {
           </button>
         </div>
 
-        <nav className="bottomNav">
-          <button
-            className="navItem activeNav"
-            type="button"
-            onClick={
-              backToConfigurator
-            }
-          >
-            <SlidersHorizontal
-              size={21}
-            />
-            <span>
-              Конфигуратор
-            </span>
-          </button>
-
-          <button
-            className="navItem"
-            type="button"
-          >
-            <ClipboardList
-              size={21}
-            />
-            <span>
-              Заказы
-            </span>
-          </button>
-
-          <button
-            className="navItem"
-            type="button"
-          >
-            <Car size={21} />
-            <span>
-              Автомобиль
-            </span>
-          </button>
-
-          <button
-            className="navItem"
-            type="button"
-          >
-            <Headphones
-              size={21}
-            />
-            <span>
-              Поддержка
-            </span>
-          </button>
-        </nav>
+        <BottomNav active="configurator" />
       </div>
     );
   }
 
   /*
-    ГЛАВНЫЙ ЭКРАН —
     КОНФИГУРАТОР
   */
 
@@ -878,7 +1422,9 @@ export default function App() {
       <header className="header">
         <div>
           <div className="logo">
-            Garage<span>Flow</span>
+            Garage<span>
+              Flow
+            </span>
           </div>
 
           <div className="subtitle">
@@ -891,6 +1437,7 @@ export default function App() {
           type="button"
         >
           <Bell size={23} />
+
           <span className="notificationDot" />
         </button>
       </header>
@@ -908,7 +1455,8 @@ export default function App() {
               </h1>
 
               <p>
-                2023 · Передний привод
+                2023 · Передний
+                привод
               </p>
             </div>
 
@@ -916,25 +1464,19 @@ export default function App() {
               🚐
             </div>
           </div>
-
-          <button
-            className="linkButton"
-            type="button"
-          >
-            Изменить автомобиль
-            <ChevronRight size={18} />
-          </button>
         </section>
 
         <section className="section">
           <div className="sectionHeader">
             <div>
               <h2>
-                Выберите дооборудование
+                Выберите
+                дооборудование
               </h2>
 
               <p>
-                Можно выбрать несколько вариантов
+                Можно выбрать
+                несколько вариантов
               </p>
             </div>
 
@@ -982,7 +1524,9 @@ export default function App() {
                       <div className="serviceContent">
                         <div>
                           <h3>
-                            {service.name}
+                            {
+                              service.name
+                            }
                           </h3>
 
                           <strong>
@@ -1072,8 +1616,7 @@ export default function App() {
       <div className="totalBar">
         <div>
           <span>
-            {selectedServices.length >
-            0
+            {selectedServices.length
               ? `Выбрано: ${selectedServices.length}`
               : "Предварительно"}
           </span>
@@ -1097,64 +1640,16 @@ export default function App() {
               0
                 ? 0.5
                 : 1,
-
-            cursor:
-              selectedServices.length ===
-              0
-                ? "default"
-                : "pointer",
           }}
         >
           Продолжить
-          <ChevronRight size={20} />
+          <ChevronRight
+            size={20}
+          />
         </button>
       </div>
 
-      <nav className="bottomNav">
-        <button
-          className="navItem activeNav"
-          type="button"
-        >
-          <SlidersHorizontal
-            size={21}
-          />
-          <span>
-            Конфигуратор
-          </span>
-        </button>
-
-        <button
-          className="navItem"
-          type="button"
-        >
-          <ClipboardList
-            size={21}
-          />
-          <span>
-            Заказы
-          </span>
-        </button>
-
-        <button
-          className="navItem"
-          type="button"
-        >
-          <Car size={21} />
-          <span>
-            Автомобиль
-          </span>
-        </button>
-
-        <button
-          className="navItem"
-          type="button"
-        >
-          <Headphones size={21} />
-          <span>
-            Поддержка
-          </span>
-        </button>
-      </nav>
+      <BottomNav active="configurator" />
     </div>
   );
 }
