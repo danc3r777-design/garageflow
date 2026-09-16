@@ -755,3 +755,66 @@
   .crmCalendarRow { gap:9px; padding:12px; }
   .crmCalendarTime { width:42px; }
 }
+
+/* GarageFlow CRM — expanded customer, vehicle, calendar and funnel views */
+.crmFunnelPanel,
+.crmCancelledPanel,
+.crmDayAgenda {
+  margin-top: 18px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 18px rgba(26, 44, 75, 0.04);
+}
+.crmFunnel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 18px; }
+.crmFunnelTop { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #718096; }
+.crmFunnelTop strong { color: #17233a; font-size: 16px; }
+.crmFunnelTrack { height: 8px; border-radius: 99px; background: #edf1f6; overflow: hidden; margin-top: 9px; }
+.crmFunnelFill { height: 100%; border-radius: inherit; background: #1672f3; }
+.crmToolbarSplit { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.crmFilterButton { border: 1px solid #dfe5ed; background: #fff; color: #66758a; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; font: inherit; }
+.crmFilterButton span { min-width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px; background: #edf1f6; font-size: 11px; font-weight: 800; }
+.crmFilterButtonActive { border-color: #e2a7a7; background: #fff6f6; color: #b63b3b; }
+.crmCancelledPanel { max-width: 760px; }
+.crmDataCardButton { text-align: left; border: 0; font: inherit; color: inherit; cursor: pointer; width: 100%; }
+.crmDataCardButton:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(26,44,75,.09); }
+.crmEntityModal { width: min(560px, 100%); }
+.crmEntityFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 24px; }
+.crmEntityFacts > div { border: 1px solid #e6eaf0; border-radius: 12px; padding: 13px; display: grid; grid-template-columns: 24px 1fr; column-gap: 7px; align-items: center; }
+.crmEntityFacts svg { grid-row: 1 / 3; color: #1672f3; }
+.crmEntityFacts span { color: #8995a6; font-size: 10px; text-transform: uppercase; font-weight: 700; }
+.crmEntityFacts strong { font-size: 13px; overflow-wrap: anywhere; }
+.crmEntityRow { width: 100%; border: 0; border-bottom: 1px solid #edf0f4; background: #fff; padding: 13px; display: grid; grid-template-columns: 22px 1fr 18px; gap: 10px; align-items: center; text-align: left; color: #17233a; cursor: pointer; }
+.crmEntityRow:last-child { border-bottom: 0; }
+.crmEntityRow:hover { background: #f7f9fc; }
+.crmEntityRow > div strong, .crmEntityRow > div span { display: block; }
+.crmEntityRow > div span { margin-top: 3px; color: #8994a5; font-size: 11px; }
+.crmMonthSection { margin-top: 24px; }
+.crmMonthToolbar { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 16px; }
+.crmMonthToolbar h2 { margin: 0; min-width: 220px; text-align: center; text-transform: capitalize; font-size: 20px; }
+.crmMonthToolbar button { width: 38px; height: 38px; border: 1px solid #dfe5ed; background: #fff; border-radius: 10px; display: grid; place-items: center; cursor: pointer; color: #40506a; }
+.crmWeekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 8px; }
+.crmWeekdays span { text-align: center; color: #8a96a8; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.crmMonthGrid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); gap: 8px; }
+.crmMonthDay { min-height: 112px; border: 1px solid #e3e8ef; background: #fff; border-radius: 12px; padding: 10px; text-align: left; cursor: pointer; color: #17233a; overflow: hidden; }
+.crmMonthDay:hover { border-color: #b9c8dd; }
+.crmMonthDayBusy { background: #f8fbff; border-color: #d4e5fb; }
+.crmMonthDaySelected { outline: 2px solid #1672f3; border-color: #1672f3; }
+.crmMonthDayEmpty { background: transparent; border-color: transparent; cursor: default; }
+.crmMonthNumber { display: block; font-weight: 800; font-size: 13px; margin-bottom: 8px; }
+.crmMonthEvent { display: block; margin-top: 5px; padding: 5px 6px; border-radius: 7px; background: #eaf3ff; color: #1766cf; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crmMonthDay small { display: block; margin-top: 5px; color: #7d899a; font-size: 9px; }
+.crmDayAgenda { margin-top: 16px; }
+.crmDayAgenda .crmCalendarTime { min-width: 58px; font-weight: 800; color: #1672f3; }
+@media (max-width: 1100px) {
+  .crmFunnel { grid-template-columns: repeat(3, 1fr); }
+  .crmMonthGrid { grid-template-columns: repeat(7, minmax(85px, 1fr)); overflow-x: auto; }
+}
+@media (max-width: 700px) {
+  .crmFunnel { grid-template-columns: 1fr; }
+  .crmToolbarSplit { align-items: stretch; flex-direction: column; }
+  .crmFilterButton { justify-content: center; }
+  .crmEntityFacts { grid-template-columns: 1fr; }
+  .crmMonthSection { overflow-x: auto; }
+  .crmWeekdays, .crmMonthGrid { min-width: 720px; }
+}
