@@ -1,1622 +1,371 @@
-import React, {
-  useEffect,
-  useMemo,
-  useState,
-} from "react";
-
+import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase.js";
-
 import {
-  LayoutDashboard,
-  ClipboardList,
-  Users,
-  Car,
-  CalendarDays,
-  Package,
-  BarChart3,
-  Settings,
-  LogOut,
-  RefreshCw,
-  Search,
-  ChevronRight,
-  X,
-  CheckCircle2,
-  Clock3,
-  UserRound,
+  LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
+  BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
+  CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
+  CircleDollarSign, Wrench, ArrowRight,
 } from "lucide-react";
 
-
 const columns = [
-  {
-    key: "new",
-    label: "Новая заявка",
-  },
-  {
-    key: "approval",
-    label: "Согласование",
-  },
-  {
-    key: "production",
-    label: "Производство",
-  },
-  {
-    key: "installation",
-    label: "Установка",
-  },
-  {
-    key: "done",
-    label: "Готово",
-  },
+  { key: "new", label: "Новая заявка" },
+  { key: "approval", label: "Согласование" },
+  { key: "production", label: "Производство" },
+  { key: "installation", label: "Установка" },
+  { key: "done", label: "Готово" },
 ];
 
-
 const statusLabels = {
-  new: "Новая заявка",
-  approval: "Согласование",
-  production: "Производство",
-  installation: "Установка",
-  done: "Готово",
-  cancelled: "Отменён",
+  new: "Новая заявка", approval: "Согласование", production: "Производство",
+  installation: "Установка", done: "Готово", cancelled: "Отменён",
 };
 
+const pageMeta = {
+  overview: ["Обзор", "Главное по GarageFlow на сегодня"],
+  orders: ["Заказы", "Управление заявками GarageFlow"],
+  customers: ["Клиенты", "Клиенты и история их заказов"],
+  vehicles: ["Автомобили", "Автомобили клиентов GarageFlow"],
+  calendar: ["Календарь", "Запланированные работы и установки"],
+};
 
 function formatPrice(value) {
-  return (
-    new Intl.NumberFormat(
-      "ru-RU"
-    ).format(Number(value || 0)) +
-    " ₽"
-  );
+  return new Intl.NumberFormat("ru-RU").format(Number(value || 0)) + " ₽";
 }
-
-
 function formatDate(value) {
-  if (!value) {
-    return "";
-  }
-
-  return new Intl.DateTimeFormat(
-    "ru-RU",
-    {
-      day: "2-digit",
-      month: "2-digit",
-      year: "numeric",
-      hour: "2-digit",
-      minute: "2-digit",
-    }
-  ).format(new Date(value));
+  if (!value) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
+  }).format(new Date(value));
 }
-
-
+function formatDay(value) {
+  if (!value) return "";
+  return new Intl.DateTimeFormat("ru-RU", {
+    weekday: "long", day: "2-digit", month: "long", year: "numeric",
+  }).format(new Date(value));
+}
 function getCustomerName(customer) {
-  if (!customer) {
-    return "Клиент";
-  }
-
-  const name = [
-    customer.first_name,
-    customer.last_name,
-  ]
-    .filter(Boolean)
-    .join(" ");
-
-  return (
-    name ||
-    customer.username ||
-    "Клиент"
-  );
+  if (!customer) return "Клиент";
+  return [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.username || "Клиент";
 }
-
-
 function getVehicleName(vehicle) {
-  if (!vehicle) {
-    return "Автомобиль не указан";
-  }
-
-  return [
-    vehicle.brand,
-    vehicle.model,
-    vehicle.configuration,
-  ]
-    .filter(Boolean)
-    .join(" ");
+  if (!vehicle) return "Автомобиль не указан";
+  return [vehicle.brand, vehicle.model, vehicle.configuration].filter(Boolean).join(" ");
 }
-
-
 function getDateTimeLocalValue(value) {
-  if (!value) {
-    return "";
-  }
-
+  if (!value) return "";
   const date = new Date(value);
-
-  if (
-    Number.isNaN(date.getTime())
-  ) {
-    return "";
-  }
-
-  const offset =
-    date.getTimezoneOffset();
-
-  const localDate =
-    new Date(
-      date.getTime() -
-        offset * 60 * 1000
-    );
-
-  return localDate
-    .toISOString()
-    .slice(0, 16);
+  if (Number.isNaN(date.getTime())) return "";
+  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
+  return localDate.toISOString().slice(0, 16);
 }
-
+function orderAmount(order) {
+  return Number(order.final_price ?? order.preliminary_price ?? 0);
+}
 
 export default function CrmApp() {
-  const [session, setSession] =
-    useState(null);
-
-  const [
-    checkingAuth,
-    setCheckingAuth,
-  ] = useState(true);
-
-  const [email, setEmail] =
-    useState("");
-
-  const [password, setPassword] =
-    useState("");
-
-  const [
-    loginLoading,
-    setLoginLoading,
-  ] = useState(false);
-
-  const [
-    loginError,
-    setLoginError,
-  ] = useState("");
-
-  const [employee, setEmployee] =
-    useState(null);
-
-  const [orders, setOrders] =
-    useState([]);
-
-  const [loading, setLoading] =
-    useState(false);
-
-  const [error, setError] =
-    useState("");
-
-  const [search, setSearch] =
-    useState("");
-
-  const [
-    selectedOrder,
-    setSelectedOrder,
-  ] = useState(null);
-
-  const [
-    changingStatus,
-    setChangingStatus,
-  ] = useState(false);
-
-  const [
-    editingOrder,
-    setEditingOrder,
-  ] = useState({
-    final_price: "",
-    manager_comment: "",
-    scheduled_at: "",
-  });
-
-  const [
-    savingOrder,
-    setSavingOrder,
-  ] = useState(false);
-
-  const [
-    saveMessage,
-    setSaveMessage,
-  ] = useState("");
-
+  const [session, setSession] = useState(null);
+  const [checkingAuth, setCheckingAuth] = useState(true);
+  const [email, setEmail] = useState("");
+  const [password, setPassword] = useState("");
+  const [loginLoading, setLoginLoading] = useState(false);
+  const [loginError, setLoginError] = useState("");
+  const [employee, setEmployee] = useState(null);
+  const [orders, setOrders] = useState([]);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState("");
+  const [search, setSearch] = useState("");
+  const [activePage, setActivePage] = useState("overview");
+  const [selectedOrder, setSelectedOrder] = useState(null);
+  const [changingStatus, setChangingStatus] = useState(false);
+  const [editingOrder, setEditingOrder] = useState({ final_price: "", manager_comment: "", scheduled_at: "" });
+  const [savingOrder, setSavingOrder] = useState(false);
+  const [saveMessage, setSaveMessage] = useState("");
 
   useEffect(() => {
     let mounted = true;
-
     async function initialize() {
-      const {
-        data: { session },
-      } =
-        await supabase.auth.getSession();
-
-      if (!mounted) {
-        return;
-      }
-
+      const { data: { session } } = await supabase.auth.getSession();
+      if (!mounted) return;
       setSession(session);
       setCheckingAuth(false);
-
-      if (session) {
-        await loadOrders();
-      }
+      if (session) await loadOrders();
     }
-
     initialize();
-
-    const {
-      data: subscription,
-    } =
-      supabase.auth.onAuthStateChange(
-        (_event, nextSession) => {
-          setSession(
-            nextSession
-          );
-        }
-      );
-
-    return () => {
-      mounted = false;
-
-      subscription.subscription.unsubscribe();
-    };
+    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
+    return () => { mounted = false; subscription.subscription.unsubscribe(); };
   }, []);
 
-
   async function getAccessToken() {
-    const {
-      data: { session },
-    } =
-      await supabase.auth.getSession();
-
-    return (
-      session?.access_token ||
-      null
-    );
+    const { data: { session } } = await supabase.auth.getSession();
+    return session?.access_token || null;
   }
-
-
-  async function invokeCrmFunction(
-    functionName,
-    body = {}
-  ) {
-    const token =
-      await getAccessToken();
-
-    if (!token) {
-      throw new Error(
-        "Сессия закончилась. Войдите снова."
-      );
-    }
-
-    const { data, error } =
-      await supabase.functions.invoke(
-        functionName,
-        {
-          body,
-          headers: {
-            Authorization:
-              `Bearer ${token}`,
-          },
-        }
-      );
-
-    if (error) {
-      console.error(
-        functionName,
-        error
-      );
-
-      throw new Error(
-        "Ошибка соединения с CRM."
-      );
-    }
-
-    if (!data?.success) {
-      throw new Error(
-        data?.error ||
-          "Ошибка CRM."
-      );
-    }
-
+  async function invokeCrmFunction(functionName, body = {}) {
+    const token = await getAccessToken();
+    if (!token) throw new Error("Сессия закончилась. Войдите снова.");
+    const { data, error } = await supabase.functions.invoke(functionName, {
+      body, headers: { Authorization: `Bearer ${token}` },
+    });
+    if (error) { console.error(functionName, error); throw new Error("Ошибка соединения с CRM."); }
+    if (!data?.success) throw new Error(data?.error || "Ошибка CRM.");
     return data;
   }
-
-
   async function loadOrders() {
-    setLoading(true);
-    setError("");
-
+    setLoading(true); setError("");
     try {
-      const data =
-        await invokeCrmFunction(
-          "crm-orders"
-        );
-
-      setEmployee(
-        data.employee
-      );
-
-      setOrders(
-        data.orders || []
-      );
-
+      const data = await invokeCrmFunction("crm-orders");
+      setEmployee(data.employee);
+      setOrders(data.orders || []);
       if (selectedOrder) {
-        const refreshed =
-          (data.orders || []).find(
-            (order) =>
-              order.id ===
-              selectedOrder.id
-          );
-
+        const refreshed = (data.orders || []).find((o) => o.id === selectedOrder.id);
         if (refreshed) {
-          setSelectedOrder(
-            refreshed
-          );
-
+          setSelectedOrder(refreshed);
           setEditingOrder({
-            final_price:
-              refreshed.final_price ??
-              "",
-
-            manager_comment:
-              refreshed.manager_comment ??
-              "",
-
-            scheduled_at:
-              getDateTimeLocalValue(
-                refreshed.scheduled_at
-              ),
+            final_price: refreshed.final_price ?? "",
+            manager_comment: refreshed.manager_comment ?? "",
+            scheduled_at: getDateTimeLocalValue(refreshed.scheduled_at),
           });
         }
       }
     } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Ошибка загрузки CRM."
-      );
-    } finally {
-      setLoading(false);
-    }
+      console.error(err); setError(err instanceof Error ? err.message : "Ошибка загрузки CRM.");
+    } finally { setLoading(false); }
   }
-
-
   async function login(event) {
-    event.preventDefault();
-
-    setLoginLoading(true);
-    setLoginError("");
-
+    event.preventDefault(); setLoginLoading(true); setLoginError("");
     try {
-      const {
-        data,
-        error,
-      } =
-        await supabase.auth
-          .signInWithPassword({
-            email,
-            password,
-          });
-
-      if (error) {
-        throw error;
-      }
-
-      setSession(
-        data.session
-      );
-
-      await loadOrders();
-    } catch (err) {
-      console.error(err);
-
-      setLoginError(
-        "Неверный email или пароль."
-      );
-    } finally {
-      setLoginLoading(false);
-    }
+      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
+      if (error) throw error;
+      setSession(data.session); await loadOrders();
+    } catch (err) { console.error(err); setLoginError("Неверный email или пароль."); }
+    finally { setLoginLoading(false); }
   }
-
-
   async function logout() {
-    await supabase.auth.signOut();
-
-    setSession(null);
-    setEmployee(null);
-    setOrders([]);
-    setSelectedOrder(null);
+    await supabase.auth.signOut(); setSession(null); setEmployee(null); setOrders([]); setSelectedOrder(null);
   }
-
-
   function openOrder(order) {
     setEditingOrder({
-      final_price:
-        order.final_price ?? "",
-
-      manager_comment:
-        order.manager_comment ?? "",
-
-      scheduled_at:
-        getDateTimeLocalValue(
-          order.scheduled_at
-        ),
+      final_price: order.final_price ?? "",
+      manager_comment: order.manager_comment ?? "",
+      scheduled_at: getDateTimeLocalValue(order.scheduled_at),
     });
-
-    setSaveMessage("");
-    setError("");
-    setSelectedOrder(order);
+    setSaveMessage(""); setError(""); setSelectedOrder(order);
   }
+  function goToOrder(order) { setActivePage("orders"); openOrder(order); }
 
-
-  async function changeStatus(
-    order,
-    status
-  ) {
-    if (
-      changingStatus ||
-      order.status === status
-    ) {
-      return;
-    }
-
-    setChangingStatus(true);
-    setError("");
-    setSaveMessage("");
-
+  async function changeStatus(order, status) {
+    if (changingStatus || order.status === status) return;
+    setChangingStatus(true); setError(""); setSaveMessage("");
     try {
-      await invokeCrmFunction(
-        "crm-update-status",
-        {
-          order_id: order.id,
-          status,
-        }
-      );
-
-      const updatedOrders =
-        orders.map(
-          (current) =>
-            current.id ===
-            order.id
-              ? {
-                  ...current,
-                  status,
-                }
-              : current
-        );
-
-      setOrders(
-        updatedOrders
-      );
-
-      if (
-        selectedOrder?.id ===
-        order.id
-      ) {
-        setSelectedOrder(
-          (current) => ({
-            ...current,
-            status,
-          })
-        );
-      }
-
-      setSaveMessage(
-        "Статус изменён"
-      );
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Не удалось изменить статус."
-      );
-    } finally {
-      setChangingStatus(false);
-    }
+      await invokeCrmFunction("crm-update-status", { order_id: order.id, status });
+      setOrders((current) => current.map((o) => o.id === order.id ? { ...o, status } : o));
+      if (selectedOrder?.id === order.id) setSelectedOrder((current) => ({ ...current, status }));
+      setSaveMessage("Статус изменён");
+    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось изменить статус."); }
+    finally { setChangingStatus(false); }
   }
-
-
   async function saveOrderChanges() {
-    if (
-      !selectedOrder ||
-      savingOrder
-    ) {
-      return;
-    }
-
-    setSavingOrder(true);
-    setSaveMessage("");
-    setError("");
-
+    if (!selectedOrder || savingOrder) return;
+    setSavingOrder(true); setSaveMessage(""); setError("");
     try {
       let scheduledAt = null;
-
-      if (
-        editingOrder.scheduled_at
-      ) {
-        const date =
-          new Date(
-            editingOrder.scheduled_at
-          );
-
-        if (
-          Number.isNaN(
-            date.getTime()
-          )
-        ) {
-          throw new Error(
-            "Проверьте дату и время записи."
-          );
-        }
-
-        scheduledAt =
-          date.toISOString();
+      if (editingOrder.scheduled_at) {
+        const date = new Date(editingOrder.scheduled_at);
+        if (Number.isNaN(date.getTime())) throw new Error("Проверьте дату и время записи.");
+        scheduledAt = date.toISOString();
       }
-
-      const data =
-        await invokeCrmFunction(
-          "crm-update-order",
-          {
-            order_id:
-              selectedOrder.id,
-
-            final_price:
-              editingOrder.final_price ===
-              ""
-                ? null
-                : Number(
-                    editingOrder.final_price
-                  ),
-
-            manager_comment:
-              editingOrder.manager_comment,
-
-            scheduled_at:
-              scheduledAt,
-          }
-        );
-
-      const updated = {
-        ...selectedOrder,
-        ...data.order,
-      };
-
-      setSelectedOrder(
-        updated
-      );
-
-      setOrders(
-        (currentOrders) =>
-          currentOrders.map(
-            (order) =>
-              order.id ===
-              updated.id
-                ? {
-                    ...order,
-                    ...data.order,
-                  }
-                : order
-          )
-      );
-
-      setEditingOrder({
-        final_price:
-          updated.final_price ?? "",
-
-        manager_comment:
-          updated.manager_comment ?? "",
-
-        scheduled_at:
-          getDateTimeLocalValue(
-            updated.scheduled_at
-          ),
+      const data = await invokeCrmFunction("crm-update-order", {
+        order_id: selectedOrder.id,
+        final_price: editingOrder.final_price === "" ? null : Number(editingOrder.final_price),
+        manager_comment: editingOrder.manager_comment,
+        scheduled_at: scheduledAt,
       });
-
-      setSaveMessage(
-        "Изменения сохранены"
-      );
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Не удалось сохранить заказ."
-      );
-    } finally {
-      setSavingOrder(false);
-    }
+      const updated = { ...selectedOrder, ...data.order };
+      setSelectedOrder(updated);
+      setOrders((current) => current.map((o) => o.id === updated.id ? { ...o, ...data.order } : o));
+      setEditingOrder({
+        final_price: updated.final_price ?? "",
+        manager_comment: updated.manager_comment ?? "",
+        scheduled_at: getDateTimeLocalValue(updated.scheduled_at),
+      });
+      setSaveMessage("Изменения сохранены");
+    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось сохранить заказ."); }
+    finally { setSavingOrder(false); }
   }
-
-
   async function cancelOrder() {
-    if (
-      !selectedOrder ||
-      savingOrder
-    ) {
-      return;
-    }
-
-    const confirmed =
-      window.confirm(
-        `Отменить заказ №${selectedOrder.id}?`
-      );
-
-    if (!confirmed) {
-      return;
-    }
-
-    setSavingOrder(true);
-    setError("");
-    setSaveMessage("");
-
+    if (!selectedOrder || savingOrder) return;
+    if (!window.confirm(`Отменить заказ №${selectedOrder.id}?`)) return;
+    setSavingOrder(true); setError(""); setSaveMessage("");
     try {
-      const data =
-        await invokeCrmFunction(
-          "crm-update-order",
-          {
-            order_id:
-              selectedOrder.id,
-
-            status:
-              "cancelled",
-          }
-        );
-
-      setOrders(
-        (currentOrders) =>
-          currentOrders.map(
-            (order) =>
-              order.id ===
-              selectedOrder.id
-                ? {
-                    ...order,
-                    ...data.order,
-                  }
-                : order
-          )
-      );
-
+      const data = await invokeCrmFunction("crm-update-order", { order_id: selectedOrder.id, status: "cancelled" });
+      setOrders((current) => current.map((o) => o.id === selectedOrder.id ? { ...o, ...data.order } : o));
       setSelectedOrder(null);
-    } catch (err) {
-      console.error(err);
-
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Не удалось отменить заказ."
-      );
-    } finally {
-      setSavingOrder(false);
-    }
+    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось отменить заказ."); }
+    finally { setSavingOrder(false); }
   }
 
+  const filteredOrders = useMemo(() => {
+    const q = search.trim().toLowerCase();
+    if (!q) return orders;
+    return orders.filter((order) => [
+      order.id, getCustomerName(order.customer), order.customer?.phone,
+      getVehicleName(order.vehicle), order.vehicle?.license_plate,
+    ].filter(Boolean).join(" ").toLowerCase().includes(q));
+  }, [orders, search]);
 
-  const filteredOrders =
-    useMemo(() => {
-      const query =
-        search
-          .trim()
-          .toLowerCase();
+  const customers = useMemo(() => {
+    const map = new Map();
+    orders.forEach((order) => {
+      const c = order.customer;
+      if (!c) return;
+      const key = c.id ?? `customer-${getCustomerName(c)}-${c.phone || ""}`;
+      const current = map.get(key) || { ...c, ordersCount: 0, total: 0, lastOrder: null };
+      current.ordersCount += 1; current.total += orderAmount(order);
+      if (!current.lastOrder || new Date(order.created_at) > new Date(current.lastOrder.created_at)) current.lastOrder = order;
+      map.set(key, current);
+    });
+    return [...map.values()].sort((a, b) => new Date(b.lastOrder?.created_at || 0) - new Date(a.lastOrder?.created_at || 0));
+  }, [orders]);
 
-      if (!query) {
-        return orders;
-      }
+  const vehicles = useMemo(() => {
+    const map = new Map();
+    orders.forEach((order) => {
+      const v = order.vehicle;
+      if (!v) return;
+      const key = v.id ?? `vehicle-${v.brand}-${v.model}-${v.license_plate || ""}`;
+      const current = map.get(key) || { ...v, customer: order.customer, ordersCount: 0, lastOrder: null };
+      current.ordersCount += 1;
+      if (!current.lastOrder || new Date(order.created_at) > new Date(current.lastOrder.created_at)) current.lastOrder = order;
+      map.set(key, current);
+    });
+    return [...map.values()].sort((a, b) => new Date(b.lastOrder?.created_at || 0) - new Date(a.lastOrder?.created_at || 0));
+  }, [orders]);
 
-      return orders.filter(
-        (order) => {
-          const text = [
-            order.id,
+  const scheduledOrders = useMemo(() => orders
+    .filter((o) => o.scheduled_at && o.status !== "cancelled")
+    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [orders]);
 
-            getCustomerName(
-              order.customer
-            ),
+  const calendarGroups = useMemo(() => {
+    const groups = new Map();
+    scheduledOrders.forEach((order) => {
+      const d = new Date(order.scheduled_at);
+      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
+      if (!groups.has(key)) groups.set(key, []);
+      groups.get(key).push(order);
+    });
+    return [...groups.entries()];
+  }, [scheduledOrders]);
 
-            order.customer
-              ?.phone,
+  const totalRevenue = orders.reduce((sum, o) => sum + orderAmount(o), 0);
+  const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
+  const newOrders = orders.filter((o) => o.status === "new").length;
+  const doneOrders = orders.filter((o) => o.status === "done").length;
+  const upcoming = scheduledOrders.filter((o) => new Date(o.scheduled_at) >= new Date()).slice(0, 5);
+  const recent = [...orders].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
+  const [pageTitle, pageSubtitle] = pageMeta[activePage] || pageMeta.overview;
 
-            getVehicleName(
-              order.vehicle
-            ),
+  if (checkingAuth) return <div className="crmLoginPage"><div className="crmLoginCard"><div className="crmBrand">Garage<span>Flow</span></div><p>Проверяем сессию...</p></div></div>;
+  if (!session) return (
+    <div className="crmLoginPage"><form className="crmLoginCard" onSubmit={login}>
+      <div className="crmBrand">Garage<span>Flow</span></div><div className="crmLoginSubtitle">CRM для сотрудников</div>
+      <h1>Вход в систему</h1>
+      <label>Email<input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="manager@company.ru" required /></label>
+      <label>Пароль<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="••••••••" required /></label>
+      {loginError && <div className="crmError">{loginError}</div>}
+      <button className="crmPrimaryButton" type="submit" disabled={loginLoading}>{loginLoading ? "Входим..." : "Войти"}</button>
+    </form></div>
+  );
 
-            order.vehicle
-              ?.license_plate,
-          ]
-            .filter(Boolean)
-            .join(" ")
-            .toLowerCase();
-
-          return text.includes(
-            query
-          );
-        }
-      );
-    }, [orders, search]);
-
-
-  const totalRevenue =
-    orders.reduce(
-      (sum, order) =>
-        sum +
-        Number(
-          order.final_price ??
-            order.preliminary_price ??
-            0
-        ),
-      0
-    );
-
-
-  const activeOrders =
-    orders.filter(
-      (order) =>
-        ![
-          "done",
-          "cancelled",
-        ].includes(order.status)
-    ).length;
-
-
-  if (checkingAuth) {
-    return (
-      <div className="crmLoginPage">
-        <div className="crmLoginCard">
-          <div className="crmBrand">
-            Garage<span>
-              Flow
-            </span>
-          </div>
-
-          <p>
-            Проверяем сессию...
-          </p>
-        </div>
-      </div>
-    );
-  }
-
-
-  if (!session) {
-    return (
-      <div className="crmLoginPage">
-        <form
-          className="crmLoginCard"
-          onSubmit={login}
-        >
-          <div className="crmBrand">
-            Garage<span>
-              Flow
-            </span>
-          </div>
-
-          <div className="crmLoginSubtitle">
-            CRM для сотрудников
-          </div>
-
-          <h1>
-            Вход в систему
-          </h1>
-
-          <label>
-            Email
-
-            <input
-              type="email"
-              value={email}
-              onChange={(event) =>
-                setEmail(
-                  event.target.value
-                )
-              }
-              placeholder="manager@company.ru"
-              required
-            />
-          </label>
-
-          <label>
-            Пароль
-
-            <input
-              type="password"
-              value={password}
-              onChange={(event) =>
-                setPassword(
-                  event.target.value
-                )
-              }
-              placeholder="••••••••"
-              required
-            />
-          </label>
-
-          {loginError && (
-            <div className="crmError">
-              {loginError}
-            </div>
-          )}
-
-          <button
-            className="crmPrimaryButton"
-            type="submit"
-            disabled={
-              loginLoading
-            }
-          >
-            {loginLoading
-              ? "Входим..."
-              : "Войти"}
-          </button>
-        </form>
-      </div>
-    );
-  }
-
+  const menu = [
+    ["overview", LayoutDashboard, "Обзор"], ["orders", ClipboardList, "Заказы"],
+    ["customers", Users, "Клиенты"], ["vehicles", Car, "Автомобили"], ["calendar", CalendarDays, "Календарь"],
+  ];
 
   return (
     <div className="crm">
-
       <aside className="crmSidebar">
-
-        <div className="crmBrand crmSidebarBrand">
-          Garage<span>
-            Flow
-          </span>
-        </div>
-
-        <div className="crmSidebarSubtitle">
-          SERVICE CRM
-        </div>
-
-
+        <div className="crmBrand crmSidebarBrand">Garage<span>Flow</span></div>
+        <div className="crmSidebarSubtitle">SERVICE CRM</div>
         <nav className="crmMenu">
-
-          <button className="crmMenuItem">
-            <LayoutDashboard
-              size={19}
-            />
-            Обзор
-          </button>
-
-          <button className="crmMenuItem crmMenuItemActive">
-            <ClipboardList
-              size={19}
-            />
-            Заказы
-          </button>
-
-          <button className="crmMenuItem">
-            <Users size={19} />
-            Клиенты
-          </button>
-
-          <button className="crmMenuItem">
-            <Car size={19} />
-            Автомобили
-          </button>
-
-          <button className="crmMenuItem">
-            <CalendarDays
-              size={19}
-            />
-            Календарь
-          </button>
-
-          <button className="crmMenuItem">
-            <Package size={19} />
-            Склад
-          </button>
-
-          <button className="crmMenuItem">
-            <BarChart3
-              size={19}
-            />
-            Аналитика
-          </button>
-
-          <button className="crmMenuItem">
-            <Settings
-              size={19}
-            />
-            Настройки
-          </button>
-
+          {menu.map(([key, Icon, label]) => (
+            <button key={key} type="button" className={`crmMenuItem ${activePage === key ? "crmMenuItemActive" : ""}`} onClick={()=>{setActivePage(key); setSearch("");}}>
+              <Icon size={19}/>{label}
+            </button>
+          ))}
+          <button className="crmMenuItem crmMenuItemDisabled" type="button"><Package size={19}/>Склад <small>скоро</small></button>
+          <button className="crmMenuItem crmMenuItemDisabled" type="button"><BarChart3 size={19}/>Аналитика <small>скоро</small></button>
+          <button className="crmMenuItem crmMenuItemDisabled" type="button"><Settings size={19}/>Настройки <small>скоро</small></button>
         </nav>
-
-
         <div className="crmSidebarBottom">
-
-          <div className="crmEmployee">
-
-            <div className="crmAvatar">
-              <UserRound
-                size={19}
-              />
-            </div>
-
-            <div>
-              <strong>
-                {employee
-                  ?.display_name ||
-                  "Сотрудник"}
-              </strong>
-
-              <span>
-                {employee?.role}
-              </span>
-            </div>
-
-          </div>
-
-
-          <button
-            className="crmLogout"
-            type="button"
-            onClick={logout}
-          >
-            <LogOut size={18} />
-            Выйти
-          </button>
-
+          <div className="crmEmployee"><div className="crmAvatar"><UserRound size={19}/></div><div><strong>{employee?.display_name || "Сотрудник"}</strong><span>{employee?.role}</span></div></div>
+          <button className="crmLogout" type="button" onClick={logout}><LogOut size={18}/>Выйти</button>
         </div>
-
       </aside>
 
-
       <main className="crmMain">
-
-        <header className="crmTopbar">
-
-          <div>
-            <h1>
-              Заказы
-            </h1>
-
-            <p>
-              Управление заявками GarageFlow
-            </p>
-          </div>
-
-
-          <button
-            type="button"
-            className="crmRefresh"
-            onClick={loadOrders}
-            disabled={loading}
-          >
-            <RefreshCw
-              size={18}
-            />
-            Обновить
-          </button>
-
+        <header className="crmTopbar"><div><h1>{pageTitle}</h1><p>{pageSubtitle}</p></div>
+          <button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
         </header>
+        {error && <div className="crmError crmPageError">{error}</div>}
+        {loading ? <div className="crmLoading">Загружаем данные...</div> : <>
 
+          {activePage === "overview" && <>
+            <section className="crmStats crmStatsFive">
+              <div className="crmStat"><span>Новые заявки</span><strong>{newOrders}</strong></div>
+              <div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div>
+              <div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>
+              <div className="crmStat"><span>Клиентов</span><strong>{customers.length}</strong></div>
+              <div className="crmStat"><span>Сумма заказов</span><strong>{formatPrice(totalRevenue)}</strong></div>
+            </section>
+            <section className="crmDashboardGrid">
+              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Ближайшие записи</h2><p>Назначенные работы</p></div><CalendarClock size={20}/></div>
+                <div className="crmList">{upcoming.length ? upcoming.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmListIcon"><CalendarDays size={18}/></div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatDate(o.scheduled_at)}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Ближайших записей пока нет</div>}</div>
+              </div>
+              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Последние заказы</h2><p>Недавняя активность</p></div><ClipboardList size={20}/></div>
+                <div className="crmList">{recent.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmListIcon"><Hash size={18}/></div><div className="crmListMain"><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{statusLabels[o.status] || o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={18}/></button>)}</div>
+              </div>
+            </section>
+            <section className="crmQuickGrid">
+              <button onClick={()=>setActivePage("orders")}><Wrench size={21}/><div><strong>Открыть заказы</strong><span>Kanban и карточки работ</span></div><ArrowRight size={18}/></button>
+              <button onClick={()=>setActivePage("customers")}><Users size={21}/><div><strong>База клиентов</strong><span>{customers.length} клиентов</span></div><ArrowRight size={18}/></button>
+              <button onClick={()=>setActivePage("calendar")}><CalendarClock size={21}/><div><strong>Календарь</strong><span>{scheduledOrders.length} записей</span></div><ArrowRight size={18}/></button>
+            </section>
+          </>}
 
-        <section className="crmStats">
+          {activePage === "orders" && <>
+            <section className="crmStats"><div className="crmStat"><span>Всего заказов</span><strong>{orders.length}</strong></div><div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div><div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div><div className="crmStat"><span>Сумма заказов</span><strong>{formatPrice(totalRevenue)}</strong></div></section>
+            <section className="crmToolbar"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск по клиенту, автомобилю, номеру..."/></div></section>
+            <section className="crmBoard">{columns.map((column)=>{const columnOrders=filteredOrders.filter((o)=>o.status===column.key); return <div className="crmColumn" key={column.key}><div className="crmColumnHeader"><span>{column.label}</span><strong>{columnOrders.length}</strong></div><div className="crmColumnCards">{columnOrders.map((o)=><article key={o.id} className="crmOrderCard" onClick={()=>openOrder(o)}><div className="crmOrderTop"><span>Заказ №{o.id}</span><ChevronRight size={17}/></div><h3>{getVehicleName(o.vehicle)}</h3><p className="crmCustomerName">{getCustomerName(o.customer)}</p><div className="crmServices">{o.items?.map((i)=>i.service_name).join(" • ")}</div>{o.scheduled_at&&<div className="crmOrderSchedule"><Clock3 size={14}/>{formatDate(o.scheduled_at)}</div>}<div className="crmOrderBottom"><strong>{formatPrice(orderAmount(o))}</strong><span>{formatDate(o.created_at)}</span></div></article>)}{!columnOrders.length&&<div className="crmEmptyColumn">Нет заказов</div>}</div></div>})}</section>
+          </>}
 
-          <div className="crmStat">
-            <span>
-              Всего заказов
-            </span>
+          {activePage === "customers" && <section className="crmDataSection">
+            <div className="crmToolbar"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск клиента..."/></div></div>
+            <div className="crmDataGrid">{customers.filter((c)=>!search.trim() || [getCustomerName(c),c.phone,c.username].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase())).map((c)=><article className="crmDataCard" key={c.id ?? getCustomerName(c)}><div className="crmDataCardHead"><div className="crmDataAvatar"><UserRound size={20}/></div><div><h3>{getCustomerName(c)}</h3><span>{c.ordersCount} заказ(а)</span></div></div><div className="crmDataInfo">{c.phone&&<div><Phone size={15}/>{c.phone}</div>}{c.username&&<div><AtSign size={15}/>@{c.username}</div>}<div><CircleDollarSign size={15}/>{formatPrice(c.total)}</div></div>{c.lastOrder&&<button className="crmCardLink" onClick={()=>goToOrder(c.lastOrder)}>Последний заказ №{c.lastOrder.id}<ChevronRight size={16}/></button>}</article>)}</div>
+          </section>}
 
-            <strong>
-              {orders.length}
-            </strong>
-          </div>
+          {activePage === "vehicles" && <section className="crmDataSection">
+            <div className="crmToolbar"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск автомобиля или госномера..."/></div></div>
+            <div className="crmDataGrid">{vehicles.filter((v)=>!search.trim() || [getVehicleName(v),v.license_plate,v.vin,getCustomerName(v.customer)].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase())).map((v)=><article className="crmDataCard" key={v.id ?? getVehicleName(v)}><div className="crmDataCardHead"><div className="crmDataAvatar"><Car size={20}/></div><div><h3>{getVehicleName(v)}</h3><span>{v.year || "Год не указан"}</span></div></div><div className="crmDataInfo"><div><UserRound size={15}/>{getCustomerName(v.customer)}</div>{v.license_plate&&<div><Hash size={15}/>{v.license_plate}</div>}{v.vin&&<div><Hash size={15}/>VIN: {v.vin}</div>}<div><ClipboardList size={15}/>{v.ordersCount} заказ(а)</div></div>{v.lastOrder&&<button className="crmCardLink" onClick={()=>goToOrder(v.lastOrder)}>Открыть заказ №{v.lastOrder.id}<ChevronRight size={16}/></button>}</article>)}</div>
+          </section>}
 
-
-          <div className="crmStat">
-            <span>
-              В работе
-            </span>
-
-            <strong>
-              {activeOrders}
-            </strong>
-          </div>
-
-
-          <div className="crmStat">
-            <span>
-              Завершено
-            </span>
-
-            <strong>
-              {
-                orders.filter(
-                  (order) =>
-                    order.status ===
-                    "done"
-                ).length
-              }
-            </strong>
-          </div>
-
-
-          <div className="crmStat">
-            <span>
-              Сумма заказов
-            </span>
-
-            <strong>
-              {formatPrice(
-                totalRevenue
-              )}
-            </strong>
-          </div>
-
-        </section>
-
-
-        <section className="crmToolbar">
-
-          <div className="crmSearch">
-
-            <Search size={18} />
-
-            <input
-              value={search}
-              onChange={(event) =>
-                setSearch(
-                  event.target.value
-                )
-              }
-              placeholder="Поиск по клиенту, автомобилю, номеру..."
-            />
-
-          </div>
-
-        </section>
-
-
-        {error && (
-          <div className="crmError crmPageError">
-            {error}
-          </div>
-        )}
-
-
-        {loading ? (
-          <div className="crmLoading">
-            Загружаем заказы...
-          </div>
-        ) : (
-          <section className="crmBoard">
-
-            {columns.map(
-              (column) => {
-
-                const columnOrders =
-                  filteredOrders.filter(
-                    (order) =>
-                      order.status ===
-                      column.key
-                  );
-
-                return (
-                  <div
-                    className="crmColumn"
-                    key={
-                      column.key
-                    }
-                  >
-
-                    <div className="crmColumnHeader">
-
-                      <span>
-                        {
-                          column.label
-                        }
-                      </span>
-
-                      <strong>
-                        {
-                          columnOrders.length
-                        }
-                      </strong>
-
-                    </div>
-
-
-                    <div className="crmColumnCards">
-
-                      {columnOrders.map(
-                        (order) => (
-
-                          <article
-                            key={
-                              order.id
-                            }
-                            className="crmOrderCard"
-                            onClick={() =>
-                              openOrder(
-                                order
-                              )
-                            }
-                          >
-
-                            <div className="crmOrderTop">
-
-                              <span>
-                                Заказ №
-                                {
-                                  order.id
-                                }
-                              </span>
-
-                              <ChevronRight
-                                size={17}
-                              />
-
-                            </div>
-
-
-                            <h3>
-                              {getVehicleName(
-                                order.vehicle
-                              )}
-                            </h3>
-
-
-                            <p className="crmCustomerName">
-                              {getCustomerName(
-                                order.customer
-                              )}
-                            </p>
-
-
-                            <div className="crmServices">
-                              {order.items
-                                ?.map(
-                                  (item) =>
-                                    item.service_name
-                                )
-                                .join(
-                                  " • "
-                                )}
-                            </div>
-
-
-                            {order.scheduled_at && (
-                              <div className="crmOrderSchedule">
-                                <Clock3
-                                  size={14}
-                                />
-                                {formatDate(
-                                  order.scheduled_at
-                                )}
-                              </div>
-                            )}
-
-
-                            <div className="crmOrderBottom">
-
-                              <strong>
-                                {formatPrice(
-                                  order.final_price ??
-                                    order.preliminary_price
-                                )}
-                              </strong>
-
-                              <span>
-                                {formatDate(
-                                  order.created_at
-                                )}
-                              </span>
-
-                            </div>
-
-                          </article>
-                        )
-                      )}
-
-
-                      {columnOrders.length ===
-                        0 && (
-                        <div className="crmEmptyColumn">
-                          Нет заказов
-                        </div>
-                      )}
-
-                    </div>
-
-                  </div>
-                );
-              }
-            )}
-
-          </section>
-        )}
-
+          {activePage === "calendar" && <section className="crmCalendar">{calendarGroups.length ? calendarGroups.map(([day,list])=><div className="crmCalendarDay" key={day}><div className="crmCalendarDate"><CalendarDays size={19}/><strong>{formatDay(list[0].scheduled_at)}</strong><span>{list.length}</span></div><div className="crmCalendarRows">{list.map((o)=><button key={o.id} className="crmCalendarRow" onClick={()=>goToOrder(o)}><div className="crmCalendarTime">{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</div><div className="crmCalendarBody"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · Заказ №{o.id}</span></div><div className="crmCalendarStatus">{statusLabels[o.status]||o.status}</div><ChevronRight size={18}/></button>)}</div></div>) : <div className="crmEmptyState crmEmptyLarge">Записей в календаре пока нет. Назначь дату в карточке заказа.</div>}</section>}
+        </>}
       </main>
 
-
-      {selectedOrder && (
-
-        <div
-          className="crmModalBackdrop"
-          onClick={() =>
-            setSelectedOrder(
-              null
-            )
-          }
-        >
-
-          <div
-            className="crmModal"
-            onClick={(event) =>
-              event.stopPropagation()
-            }
-          >
-
-            <button
-              className="crmModalClose"
-              type="button"
-              onClick={() =>
-                setSelectedOrder(
-                  null
-                )
-              }
-            >
-              <X size={21} />
-            </button>
-
-
-            <div className="crmOrderNumber">
-              ЗАКАЗ №
-              {selectedOrder.id}
-            </div>
-
-
-            <h2>
-              {getVehicleName(
-                selectedOrder.vehicle
-              )}
-            </h2>
-
-
-            <p className="crmModalCustomer">
-
-              {getCustomerName(
-                selectedOrder.customer
-              )}
-
-              {selectedOrder
-                .customer?.phone &&
-                ` · ${selectedOrder.customer.phone}`}
-
-            </p>
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Текущий статус
-              </span>
-
-              <strong>
-                {
-                  statusLabels[
-                    selectedOrder.status
-                  ] ||
-                  selectedOrder.status
-                }
-              </strong>
-
-            </div>
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Изменить статус
-              </span>
-
-              <div className="crmStatusButtons">
-
-                {columns.map(
-                  (column) => (
-
-                    <button
-                      key={
-                        column.key
-                      }
-                      type="button"
-                      disabled={
-                        changingStatus ||
-                        savingOrder
-                      }
-                      className={
-                        selectedOrder.status ===
-                        column.key
-                          ? "crmStatusButton crmStatusButtonActive"
-                          : "crmStatusButton"
-                      }
-                      onClick={() =>
-                        changeStatus(
-                          selectedOrder,
-                          column.key
-                        )
-                      }
-                    >
-
-                      {selectedOrder.status ===
-                        column.key && (
-                        <CheckCircle2
-                          size={15}
-                        />
-                      )}
-
-                      {
-                        column.label
-                      }
-
-                    </button>
-
-                  )
-                )}
-
-              </div>
-
-            </div>
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Работы
-              </span>
-
-              <div className="crmModalItems">
-
-                {selectedOrder.items?.map(
-                  (item) => (
-
-                    <div
-                      key={
-                        item.id
-                      }
-                      className="crmModalItem"
-                    >
-
-                      <div>
-
-                        <strong>
-                          {
-                            item.service_name
-                          }
-                        </strong>
-
-                        {item.material && (
-                          <span>
-                            {
-                              item.material
-                            }
-                          </span>
-                        )}
-
-                      </div>
-
-                      <strong>
-                        {formatPrice(
-                          item.price
-                        )}
-                      </strong>
-
-                    </div>
-
-                  )
-                )}
-
-              </div>
-
-            </div>
-
-
-            {selectedOrder
-              .customer_comment && (
-
-              <div className="crmModalSection">
-
-                <span className="crmModalLabel">
-                  Комментарий клиента
-                </span>
-
-                <p>
-                  {
-                    selectedOrder
-                      .customer_comment
-                  }
-                </p>
-
-              </div>
-            )}
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Дата и время записи
-              </span>
-
-              <input
-                className="crmEditInput"
-                type="datetime-local"
-                value={
-                  editingOrder.scheduled_at
-                }
-                onChange={(event) =>
-                  setEditingOrder(
-                    (current) => ({
-                      ...current,
-                      scheduled_at:
-                        event.target.value,
-                    })
-                  )
-                }
-              />
-
-            </div>
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Итоговая стоимость
-              </span>
-
-              <div className="crmPriceInputWrap">
-
-                <input
-                  className="crmEditInput"
-                  type="number"
-                  min="0"
-                  step="1"
-                  value={
-                    editingOrder.final_price
-                  }
-                  onChange={(event) =>
-                    setEditingOrder(
-                      (current) => ({
-                        ...current,
-                        final_price:
-                          event.target.value,
-                      })
-                    )
-                  }
-                  placeholder="Например, 52000"
-                />
-
-                <span>
-                  ₽
-                </span>
-
-              </div>
-
-            </div>
-
-
-            <div className="crmModalSection">
-
-              <span className="crmModalLabel">
-                Комментарий менеджера
-              </span>
-
-              <textarea
-                className="crmEditTextarea"
-                value={
-                  editingOrder.manager_comment
-                }
-                onChange={(event) =>
-                  setEditingOrder(
-                    (current) => ({
-                      ...current,
-                      manager_comment:
-                        event.target.value,
-                    })
-                  )
-                }
-                placeholder="Например: клиент согласовал дополнительную защиту арок"
-                rows={4}
-              />
-
-            </div>
-
-
-            {saveMessage && (
-
-              <div className="crmSaveSuccess">
-
-                <CheckCircle2
-                  size={17}
-                />
-
-                {saveMessage}
-
-              </div>
-            )}
-
-
-            <div className="crmModalTotal">
-
-              <span>
-                Стоимость
-              </span>
-
-              <strong>
-                {formatPrice(
-                  selectedOrder.final_price ??
-                    selectedOrder.preliminary_price
-                )}
-              </strong>
-
-            </div>
-
-
-            <div className="crmModalDate">
-
-              <Clock3 size={16} />
-
-              Создан{" "}
-              {formatDate(
-                selectedOrder.created_at
-              )}
-
-            </div>
-
-
-            <div className="crmModalActions">
-
-              <button
-                type="button"
-                className="crmSaveButton"
-                disabled={
-                  savingOrder ||
-                  changingStatus
-                }
-                onClick={
-                  saveOrderChanges
-                }
-              >
-                {savingOrder
-                  ? "Сохраняем..."
-                  : "Сохранить изменения"}
-              </button>
-
-
-              <button
-                type="button"
-                className="crmCancelButton"
-                disabled={
-                  savingOrder ||
-                  changingStatus ||
-                  selectedOrder.status ===
-                    "cancelled"
-                }
-                onClick={
-                  cancelOrder
-                }
-              >
-                {selectedOrder.status ===
-                "cancelled"
-                  ? "Заказ отменён"
-                  : "Отменить заказ"}
-              </button>
-
-            </div>
-
-          </div>
-
-        </div>
-      )}
-
+      {selectedOrder && <div className="crmModalBackdrop" onClick={()=>setSelectedOrder(null)}><div className="crmModal" onClick={(e)=>e.stopPropagation()}>
+        <button className="crmModalClose" type="button" onClick={()=>setSelectedOrder(null)}><X size={21}/></button>
+        <div className="crmOrderNumber">ЗАКАЗ №{selectedOrder.id}</div><h2>{getVehicleName(selectedOrder.vehicle)}</h2><p className="crmModalCustomer">{getCustomerName(selectedOrder.customer)}{selectedOrder.customer?.phone && ` · ${selectedOrder.customer.phone}`}</p>
+        <div className="crmModalSection"><span className="crmModalLabel">Текущий статус</span><strong>{statusLabels[selectedOrder.status] || selectedOrder.status}</strong></div>
+        <div className="crmModalSection"><span className="crmModalLabel">Изменить статус</span><div className="crmStatusButtons">{columns.map((column)=><button key={column.key} type="button" disabled={changingStatus||savingOrder} className={selectedOrder.status===column.key?"crmStatusButton crmStatusButtonActive":"crmStatusButton"} onClick={()=>changeStatus(selectedOrder,column.key)}>{selectedOrder.status===column.key&&<CheckCircle2 size={15}/>} {column.label}</button>)}</div></div>
+        <div className="crmModalSection"><span className="crmModalLabel">Работы</span><div className="crmModalItems">{selectedOrder.items?.map((item)=><div key={item.id} className="crmModalItem"><div><strong>{item.service_name}</strong>{item.material&&<span>{item.material}</span>}</div><strong>{formatPrice(item.price)}</strong></div>)}</div></div>
+        {selectedOrder.customer_comment&&<div className="crmModalSection"><span className="crmModalLabel">Комментарий клиента</span><p>{selectedOrder.customer_comment}</p></div>}
+        <div className="crmModalSection"><span className="crmModalLabel">Дата и время записи</span><input className="crmEditInput" type="datetime-local" value={editingOrder.scheduled_at} onChange={(e)=>setEditingOrder((c)=>({...c,scheduled_at:e.target.value}))}/></div>
+        <div className="crmModalSection"><span className="crmModalLabel">Итоговая стоимость</span><div className="crmPriceInputWrap"><input className="crmEditInput" type="number" min="0" step="1" value={editingOrder.final_price} onChange={(e)=>setEditingOrder((c)=>({...c,final_price:e.target.value}))} placeholder="Например, 52000"/><span>₽</span></div></div>
+        <div className="crmModalSection"><span className="crmModalLabel">Комментарий менеджера</span><textarea className="crmEditTextarea" value={editingOrder.manager_comment} onChange={(e)=>setEditingOrder((c)=>({...c,manager_comment:e.target.value}))} placeholder="Например: клиент согласовал дополнительную защиту арок" rows={4}/></div>
+        {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
+        <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>
+        <div className="crmModalDate"><Clock3 size={16}/>Создан {formatDate(selectedOrder.created_at)}</div>
+        <div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>
+      </div></div>}
     </div>
   );
 }
-
-
