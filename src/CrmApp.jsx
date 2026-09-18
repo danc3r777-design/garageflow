@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
   BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
   CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
-  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck,
+  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil,
 } from "lucide-react";
 
 const columns = [
@@ -27,6 +27,8 @@ const pageMeta = {
   vehicles: ["Автомобили", "Автомобили клиентов GarageFlow"],
   calendar: ["Календарь", "Запланированные работы и установки"],
   analytics: ["Аналитика", "Показатели GarageFlow по реальным заказам"],
+  warehouse: ["Склад", "Материалы, остатки и минимальные запасы"],
+  settings: ["Настройки", "Услуги, цены и сотрудники CRM"],
 };
 
 function formatPrice(value) {
@@ -91,6 +93,11 @@ export default function CrmApp() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
+  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [] });
+  const [showCreateOrder, setShowCreateOrder] = useState(false);
+  const [orderHistory, setOrderHistory] = useState([]);
+  const [newOrder, setNewOrder] = useState({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"" });
+  const [inventoryForm, setInventoryForm] = useState({ name:"", unit:"шт", quantity:"", min_quantity:"", price:"" });
 
   useEffect(() => {
     let mounted = true;
@@ -126,6 +133,10 @@ export default function CrmApp() {
       const data = await invokeCrmFunction("crm-orders");
       setEmployee(data.employee);
       setOrders(data.orders || []);
+      try {
+        const extra = await invokeCrmFunction("crm-admin", { action: "snapshot" });
+        setAdminData({ services: extra.services || [], inventory: extra.inventory || [], employees: extra.employees || [] });
+      } catch (extraError) { console.error("crm-admin snapshot", extraError); }
       if (selectedOrder) {
         const refreshed = (data.orders || []).find((o) => o.id === selectedOrder.id);
         if (refreshed) {
@@ -162,6 +173,8 @@ export default function CrmApp() {
       priority: order.priority || "normal",
     });
     setSaveMessage(""); setError(""); setSelectedOrder(order);
+    setOrderHistory([]);
+    invokeCrmFunction("crm-admin", { action:"history", order_id:order.id }).then((data)=>setOrderHistory(data.history||[])).catch(()=>setOrderHistory([]));
   }
   function goToOrder(order) { setActivePage("orders"); openOrder(order); }
 
@@ -216,6 +229,33 @@ export default function CrmApp() {
       setSelectedOrder(null);
     } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось отменить заказ."); }
     finally { setSavingOrder(false); }
+  }
+
+  async function createManualOrder(event) {
+    event.preventDefault(); setSavingOrder(true); setError("");
+    try {
+      const data = await invokeCrmFunction("crm-admin", { action:"create_order", customer:{first_name:newOrder.first_name,last_name:newOrder.last_name,phone:newOrder.phone,username:newOrder.username}, vehicle:{brand:newOrder.brand,model:newOrder.model,year:newOrder.year,configuration:newOrder.configuration,license_plate:newOrder.license_plate,vin:newOrder.vin}, service_ids:newOrder.service_ids, priority:newOrder.priority, scheduled_at:newOrder.scheduled_at ? new Date(newOrder.scheduled_at).toISOString() : null, comment:newOrder.comment });
+      setShowCreateOrder(false); setNewOrder({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"" }); await loadOrders(); setActivePage("orders");
+      alert(`Заказ №${data.order_id} создан`);
+    } catch(err){ setError(err instanceof Error?err.message:"Не удалось создать заказ"); } finally { setSavingOrder(false); }
+  }
+  async function saveInventory(event) {
+    event.preventDefault();
+    try { await invokeCrmFunction("crm-admin", { action:"save_inventory", ...inventoryForm }); setInventoryForm({name:"",unit:"шт",quantity:"",min_quantity:"",price:""}); await loadOrders(); }
+    catch(err){ setError(err instanceof Error?err.message:"Не удалось сохранить материал"); }
+  }
+  async function editCustomerQuick(customer) {
+    const first_name=prompt("Имя",customer.first_name||""); if(first_name===null)return;
+    const last_name=prompt("Фамилия",customer.last_name||""); if(last_name===null)return;
+    const phone=prompt("Телефон",customer.phone||""); if(phone===null)return;
+    const username=prompt("Telegram без @",customer.username||""); if(username===null)return;
+    try { await invokeCrmFunction("crm-admin",{action:"update_customer",id:customer.id,first_name,last_name,phone,username}); setSelectedCustomer(null); await loadOrders(); } catch(err){setError(err instanceof Error?err.message:"Ошибка клиента");}
+  }
+  async function editVehicleQuick(vehicle) {
+    const brand=prompt("Марка",vehicle.brand||""); if(brand===null)return; const model=prompt("Модель",vehicle.model||""); if(model===null)return;
+    const year=prompt("Год",vehicle.year||""); if(year===null)return; const configuration=prompt("Конфигурация",vehicle.configuration||""); if(configuration===null)return;
+    const license_plate=prompt("Госномер",vehicle.license_plate||""); if(license_plate===null)return; const vin=prompt("VIN",vehicle.vin||""); if(vin===null)return;
+    try { await invokeCrmFunction("crm-admin",{action:"update_vehicle",id:vehicle.id,brand,model,year,configuration,license_plate,vin}); setSelectedVehicle(null); await loadOrders(); } catch(err){setError(err instanceof Error?err.message:"Ошибка автомобиля");}
   }
 
   const filteredOrders = useMemo(() => {
@@ -372,7 +412,7 @@ export default function CrmApp() {
   const menu = [
     ["overview", LayoutDashboard, "Обзор"], ["orders", ClipboardList, "Заказы"],
     ["customers", Users, "Клиенты"], ["vehicles", Car, "Автомобили"], ["calendar", CalendarDays, "Календарь"],
-    ["analytics", BarChart3, "Аналитика"],
+    ["analytics", BarChart3, "Аналитика"], ["warehouse", Package, "Склад"], ["settings", Settings, "Настройки"],
   ];
 
   return (
@@ -386,8 +426,7 @@ export default function CrmApp() {
               <Icon size={19}/>{label}
             </button>
           ))}
-          <button className="crmMenuItem crmMenuItemDisabled" type="button"><Package size={19}/>Склад <small>скоро</small></button>
-          <button className="crmMenuItem crmMenuItemDisabled" type="button"><Settings size={19}/>Настройки <small>скоро</small></button>
+
         </nav>
         <div className="crmSidebarBottom">
           <div className="crmEmployee"><div className="crmAvatar"><UserRound size={19}/></div><div><strong>{employee?.display_name || "Сотрудник"}</strong><span>{employee?.role}</span></div></div>
@@ -437,7 +476,7 @@ export default function CrmApp() {
 
           {activePage === "orders" && <>
             <section className="crmStats"><div className="crmStat"><span>Всего заказов</span><strong>{orders.length}</strong></div><div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div><div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div><div className="crmStat"><span>Сумма заказов</span><strong>{formatPrice(totalRevenue)}</strong></div></section>
-            <section className="crmToolbar crmToolbarSplit"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск по клиенту, автомобилю, номеру..."/></div><div className="crmOrderFilters"><select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)}><option value="all">Все статусы</option>{columns.map((c)=><option key={c.key} value={c.key}>{c.label}</option>)}</select><select value={priorityFilter} onChange={(e)=>setPriorityFilter(e.target.value)}><option value="all">Все приоритеты</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select><button className={`crmFilterButton ${showCancelled ? "crmFilterButtonActive" : ""}`} type="button" onClick={()=>setShowCancelled((value)=>!value)}>Отменённые <span>{cancelledOrders.length}</span><ChevronDown size={16}/></button></div></section>
+            <section className="crmToolbar crmToolbarSplit"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск по клиенту, автомобилю, номеру..."/></div><div className="crmOrderFilters"><select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)}><option value="all">Все статусы</option>{columns.map((c)=><option key={c.key} value={c.key}>{c.label}</option>)}</select><select value={priorityFilter} onChange={(e)=>setPriorityFilter(e.target.value)}><option value="all">Все приоритеты</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select><button className={`crmFilterButton ${showCancelled ? "crmFilterButtonActive" : ""}`} type="button" onClick={()=>setShowCancelled((value)=>!value)}>Отменённые <span>{cancelledOrders.length}</span><ChevronDown size={16}/></button><button className="crmCreateButton" type="button" onClick={()=>setShowCreateOrder(true)}><Plus size={17}/>Новый заказ</button></div></section>
             {showCancelled && <section className="crmCancelledPanel"><div className="crmPanelHeader"><div><h2>Отменённые заказы</h2><p>История отменённых заявок</p></div></div><div className="crmList">{cancelledOrders.length ? cancelledOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>openOrder(o)}><div className="crmListIcon"><Hash size={18}/></div><div className="crmListMain"><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Отменённых заказов нет</div>}</div></section>}
             <section className="crmBoard">{columns.map((column)=>{const columnOrders=filteredOrders.filter((o)=>o.status===column.key); return <div className="crmColumn" key={column.key}><div className="crmColumnHeader"><span>{column.label}</span><strong>{columnOrders.length}</strong></div><div className="crmColumnCards">{columnOrders.map((o)=><article key={o.id} className="crmOrderCard" onClick={()=>openOrder(o)}><div className="crmOrderTop"><span>Заказ №{o.id}</span><div className="crmOrderTopRight">{o.priority && o.priority!=="normal" && <span className={`crmPriorityBadge crmPriority-${o.priority}`}>{o.priority==="urgent"?"Срочный":"Высокий"}</span>}<ChevronRight size={17}/></div></div><h3>{getVehicleName(o.vehicle)}</h3><p className="crmCustomerName">{getCustomerName(o.customer)}</p><div className="crmServices">{o.items?.map((i)=>i.service_name).join(" • ")}</div>{o.scheduled_at&&<div className="crmOrderSchedule"><Clock3 size={14}/>{formatDate(o.scheduled_at)}</div>}<div className="crmOrderBottom"><strong>{formatPrice(orderAmount(o))}</strong><span>{formatDate(o.created_at)}</span></div></article>)}{!columnOrders.length&&<div className="crmEmptyColumn">Нет заказов</div>}</div></div>})}</section>
           </>}
@@ -460,6 +499,10 @@ export default function CrmApp() {
             <div className="crmDayAgenda"><div className="crmPanelHeader"><div><h2>{selectedCalendarDay ? `Записи на ${new Date(`${selectedCalendarDay}T12:00:00`).toLocaleDateString("ru-RU")}` : "Выберите день"}</h2><p>{selectedCalendarDay ? `${selectedDayOrders.length} записей` : "Нажмите на день в календаре"}</p></div><CalendarClock size={20}/></div>{selectedCalendarDay && <div className="crmList">{selectedDayOrders.length ? selectedDayOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmCalendarTime">{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · Заказ №{o.id}</span></div><div className="crmCalendarStatus">{statusLabels[o.status]||o.status}</div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">На этот день записей нет</div>}</div>}</div>
           </section>}
 
+          {activePage === "warehouse" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Остатки материалов</h2><p>{adminData.inventory.length} позиций</p></div><Boxes size={20}/></div><div className="crmInventoryList">{adminData.inventory.length ? adminData.inventory.map((item)=><div className={`crmInventoryRow ${Number(item.quantity)<=Number(item.min_quantity)?"crmInventoryLow":""}`} key={item.id}><div><strong>{item.name}</strong><span>{formatPrice(item.price)} / {item.unit}</span></div><div><span>Остаток</span><strong>{item.quantity} {item.unit}</strong></div><div><span>Минимум</span><strong>{item.min_quantity} {item.unit}</strong></div></div>) : <div className="crmEmptyState">Добавьте первый материал</div>}</div></div><form className="crmPanel crmV4Form" onSubmit={saveInventory}><div className="crmPanelHeader"><div><h2>Добавить материал</h2><p>Контроль складских остатков</p></div><Plus size={20}/></div><label>Название<input required value={inventoryForm.name} onChange={(e)=>setInventoryForm({...inventoryForm,name:e.target.value})}/></label><div className="crmFormRow"><label>Ед. изм.<input value={inventoryForm.unit} onChange={(e)=>setInventoryForm({...inventoryForm,unit:e.target.value})}/></label><label>Остаток<input type="number" min="0" step="0.01" value={inventoryForm.quantity} onChange={(e)=>setInventoryForm({...inventoryForm,quantity:e.target.value})}/></label></div><div className="crmFormRow"><label>Мин. остаток<input type="number" min="0" step="0.01" value={inventoryForm.min_quantity} onChange={(e)=>setInventoryForm({...inventoryForm,min_quantity:e.target.value})}/></label><label>Цена<input type="number" min="0" value={inventoryForm.price} onChange={(e)=>setInventoryForm({...inventoryForm,price:e.target.value})}/></label></div><button className="crmCreateButton" type="submit"><Save size={17}/>Сохранить</button></form></div></section>}
+
+          {activePage === "settings" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Услуги и цены</h2><p>Каталог GarageFlow</p></div><Wrench size={20}/></div><div className="crmSettingsList">{adminData.services.map((svc)=><div className="crmSettingsRow" key={svc.id}><div><strong>{svc.name}</strong><span>{svc.description||"Без описания"}</span></div><strong>{formatPrice(svc.base_price)}</strong></div>)}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Сотрудники</h2><p>Доступ к CRM</p></div><Users size={20}/></div><div className="crmSettingsList">{adminData.employees.map((emp)=><div className="crmSettingsRow" key={emp.id}><div><strong>{emp.display_name||"Сотрудник"}</strong><span>{emp.role}</span></div><span className={emp.is_active?"crmActiveDot":"crmInactiveDot"}>{emp.is_active?"Активен":"Отключён"}</span></div>)}</div><p className="crmHint">Создание Auth-пользователей оставлено в Supabase, чтобы не передавать пароли через CRM.</p></div></div></section>}
+
           {activePage === "analytics" && <>
             <section className="crmStats crmStatsFive">
               <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
@@ -480,9 +523,11 @@ export default function CrmApp() {
         </>}
       </main>
 
-      {selectedCustomer && <div className="crmModalBackdrop" onClick={()=>setSelectedCustomer(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedCustomer(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА КЛИЕНТА</div><h2>{getCustomerName(selectedCustomer)}</h2><p className="crmModalCustomer">{selectedCustomer.ordersCount} заказ(а) · {formatPrice(selectedCustomer.total)}</p><div className="crmEntityFacts">{selectedCustomer.phone&&<div><Phone size={17}/><span>Телефон</span><strong>{selectedCustomer.phone}</strong></div>}{selectedCustomer.username&&<div><AtSign size={17}/><span>Telegram</span><strong>@{selectedCustomer.username}</strong></div>}</div><div className="crmModalSection"><span className="crmModalLabel">Автомобили</span><div className="crmModalItems">{vehicles.filter((v)=>v.customer?.id===selectedCustomer.id).map((v)=><button className="crmEntityRow" key={v.id} onClick={()=>{setSelectedCustomer(null);setSelectedVehicle(v);}}><Car size={17}/><div><strong>{getVehicleName(v)}</strong><span>{v.license_plate||"Госномер не указан"}</span></div><ChevronRight size={17}/></button>)}</div></div><div className="crmModalSection"><span className="crmModalLabel">История заказов</span><div className="crmModalItems">{[...(selectedCustomer.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedCustomer(null);goToOrder(o);}}><ClipboardList size={17}/><div><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
+      {showCreateOrder && <div className="crmModalBackdrop" onClick={()=>setShowCreateOrder(false)}><form className="crmModal crmCreateOrderModal" onSubmit={createManualOrder} onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setShowCreateOrder(false)}><X size={21}/></button><div className="crmOrderNumber">НОВЫЙ ЗАКАЗ</div><h2>Создать заказ вручную</h2><p className="crmModalCustomer">Для звонков, WhatsApp и заявок вне Telegram</p><div className="crmModalSection"><span className="crmModalLabel">Клиент</span><div className="crmFormRow"><label>Имя<input required value={newOrder.first_name} onChange={(e)=>setNewOrder({...newOrder,first_name:e.target.value})}/></label><label>Фамилия<input value={newOrder.last_name} onChange={(e)=>setNewOrder({...newOrder,last_name:e.target.value})}/></label></div><div className="crmFormRow"><label>Телефон<input value={newOrder.phone} onChange={(e)=>setNewOrder({...newOrder,phone:e.target.value})}/></label><label>Telegram<input value={newOrder.username} onChange={(e)=>setNewOrder({...newOrder,username:e.target.value})}/></label></div></div><div className="crmModalSection"><span className="crmModalLabel">Автомобиль</span><div className="crmFormRow"><label>Марка<input required value={newOrder.brand} onChange={(e)=>setNewOrder({...newOrder,brand:e.target.value})}/></label><label>Модель<input required value={newOrder.model} onChange={(e)=>setNewOrder({...newOrder,model:e.target.value})}/></label></div><div className="crmFormRow"><label>Год<input type="number" value={newOrder.year} onChange={(e)=>setNewOrder({...newOrder,year:e.target.value})}/></label><label>Конфигурация<input value={newOrder.configuration} onChange={(e)=>setNewOrder({...newOrder,configuration:e.target.value})}/></label></div><div className="crmFormRow"><label>Госномер<input value={newOrder.license_plate} onChange={(e)=>setNewOrder({...newOrder,license_plate:e.target.value})}/></label><label>VIN<input value={newOrder.vin} onChange={(e)=>setNewOrder({...newOrder,vin:e.target.value})}/></label></div></div><div className="crmModalSection"><span className="crmModalLabel">Услуги</span><div className="crmServicePicker">{adminData.services.filter((x)=>x.is_active).map((svc)=><label key={svc.id}><input type="checkbox" checked={newOrder.service_ids.includes(svc.id)} onChange={(e)=>setNewOrder({...newOrder,service_ids:e.target.checked?[...newOrder.service_ids,svc.id]:newOrder.service_ids.filter((id)=>id!==svc.id)})}/><span><strong>{svc.name}</strong><small>{formatPrice(svc.base_price)}</small></span></label>)}</div></div><div className="crmModalSection"><span className="crmModalLabel">Запись и приоритет</span><div className="crmFormRow"><label>Дата и время<input type="datetime-local" value={newOrder.scheduled_at} onChange={(e)=>setNewOrder({...newOrder,scheduled_at:e.target.value})}/></label><label>Приоритет<select value={newOrder.priority} onChange={(e)=>setNewOrder({...newOrder,priority:e.target.value})}><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label></div><label>Комментарий<textarea rows="3" value={newOrder.comment} onChange={(e)=>setNewOrder({...newOrder,comment:e.target.value})}/></label></div><button className="crmCreateButton crmCreateWide" type="submit" disabled={savingOrder}>{savingOrder?"Создаём...":"Создать заказ"}</button></form></div>}
 
-      {selectedVehicle && <div className="crmModalBackdrop" onClick={()=>setSelectedVehicle(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedVehicle(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА АВТОМОБИЛЯ</div><h2>{getVehicleName(selectedVehicle)}</h2><p className="crmModalCustomer">{getCustomerName(selectedVehicle.customer)} · {selectedVehicle.ordersCount} заказ(а)</p><div className="crmEntityFacts"><div><Car size={17}/><span>Год</span><strong>{selectedVehicle.year||"Не указан"}</strong></div>{selectedVehicle.license_plate&&<div><Hash size={17}/><span>Госномер</span><strong>{selectedVehicle.license_plate}</strong></div>}{selectedVehicle.vin&&<div><Hash size={17}/><span>VIN</span><strong>{selectedVehicle.vin}</strong></div>}<div><CircleDollarSign size={17}/><span>Сумма работ</span><strong>{formatPrice(selectedVehicle.total)}</strong></div></div><div className="crmModalSection"><span className="crmModalLabel">История работ</span><div className="crmModalItems">{[...(selectedVehicle.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedVehicle(null);goToOrder(o);}}><Wrench size={17}/><div><strong>Заказ №{o.id}</strong><span>{o.items?.map((i)=>i.service_name).join(" • ")||"Работы не указаны"}</span><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
+      {selectedCustomer && <div className="crmModalBackdrop" onClick={()=>setSelectedCustomer(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedCustomer(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА КЛИЕНТА</div><h2>{getCustomerName(selectedCustomer)}</h2><p className="crmModalCustomer">{selectedCustomer.ordersCount} заказ(а) · {formatPrice(selectedCustomer.total)}</p><button className="crmInlineEdit" type="button" onClick={()=>editCustomerQuick(selectedCustomer)}><Pencil size={16}/>Редактировать клиента</button><div className="crmEntityFacts">{selectedCustomer.phone&&<div><Phone size={17}/><span>Телефон</span><strong>{selectedCustomer.phone}</strong></div>}{selectedCustomer.username&&<div><AtSign size={17}/><span>Telegram</span><strong>@{selectedCustomer.username}</strong></div>}</div><div className="crmModalSection"><span className="crmModalLabel">Автомобили</span><div className="crmModalItems">{vehicles.filter((v)=>v.customer?.id===selectedCustomer.id).map((v)=><button className="crmEntityRow" key={v.id} onClick={()=>{setSelectedCustomer(null);setSelectedVehicle(v);}}><Car size={17}/><div><strong>{getVehicleName(v)}</strong><span>{v.license_plate||"Госномер не указан"}</span></div><ChevronRight size={17}/></button>)}</div></div><div className="crmModalSection"><span className="crmModalLabel">История заказов</span><div className="crmModalItems">{[...(selectedCustomer.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedCustomer(null);goToOrder(o);}}><ClipboardList size={17}/><div><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
+
+      {selectedVehicle && <div className="crmModalBackdrop" onClick={()=>setSelectedVehicle(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedVehicle(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА АВТОМОБИЛЯ</div><h2>{getVehicleName(selectedVehicle)}</h2><p className="crmModalCustomer">{getCustomerName(selectedVehicle.customer)} · {selectedVehicle.ordersCount} заказ(а)</p><button className="crmInlineEdit" type="button" onClick={()=>editVehicleQuick(selectedVehicle)}><Pencil size={16}/>Редактировать автомобиль</button><div className="crmEntityFacts"><div><Car size={17}/><span>Год</span><strong>{selectedVehicle.year||"Не указан"}</strong></div>{selectedVehicle.license_plate&&<div><Hash size={17}/><span>Госномер</span><strong>{selectedVehicle.license_plate}</strong></div>}{selectedVehicle.vin&&<div><Hash size={17}/><span>VIN</span><strong>{selectedVehicle.vin}</strong></div>}<div><CircleDollarSign size={17}/><span>Сумма работ</span><strong>{formatPrice(selectedVehicle.total)}</strong></div></div><div className="crmModalSection"><span className="crmModalLabel">История работ</span><div className="crmModalItems">{[...(selectedVehicle.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedVehicle(null);goToOrder(o);}}><Wrench size={17}/><div><strong>Заказ №{o.id}</strong><span>{o.items?.map((i)=>i.service_name).join(" • ")||"Работы не указаны"}</span><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
 
       {selectedOrder && <div className="crmModalBackdrop" onClick={()=>setSelectedOrder(null)}><div className="crmModal" onClick={(e)=>e.stopPropagation()}>
         <button className="crmModalClose" type="button" onClick={()=>setSelectedOrder(null)}><X size={21}/></button>
@@ -498,7 +543,7 @@ export default function CrmApp() {
         {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
         <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>
         <div className="crmModalDate"><Clock3 size={16}/>Создан {formatDate(selectedOrder.created_at)}</div>
-        <div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>
+        <div className="crmModalSection"><span className="crmModalLabel">История заказа</span><div className="crmHistoryList">{orderHistory.length ? orderHistory.map((event)=><div className="crmHistoryItem" key={event.id}><History size={16}/><div><strong>{event.description}</strong><span>{formatDate(event.created_at)}{event.employee?.display_name?` · ${event.employee.display_name}`:""}</span></div></div>) : <div className="crmEmptyState">История появится после изменений в версии v4</div>}</div></div><div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>
       </div></div>}
     </div>
   );
