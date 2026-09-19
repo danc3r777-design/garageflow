@@ -98,6 +98,9 @@ export default function CrmApp() {
   const [orderHistory, setOrderHistory] = useState([]);
   const [newOrder, setNewOrder] = useState({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"" });
   const [inventoryForm, setInventoryForm] = useState({ name:"", unit:"шт", quantity:"", min_quantity:"", price:"" });
+  const [serviceDrafts, setServiceDrafts] = useState({});
+  const [newService, setNewService] = useState({ name:"", description:"", base_price:"", is_active:true });
+  const [savingServiceId, setSavingServiceId] = useState(null);
 
   useEffect(() => {
     let mounted = true;
@@ -244,6 +247,40 @@ export default function CrmApp() {
     try { await invokeCrmFunction("crm-admin", { action:"save_inventory", ...inventoryForm }); setInventoryForm({name:"",unit:"шт",quantity:"",min_quantity:"",price:""}); await loadOrders(); }
     catch(err){ setError(err instanceof Error?err.message:"Не удалось сохранить материал"); }
   }
+  function getServiceDraft(service) {
+    return serviceDrafts[service.id] || {
+      name: service.name || "",
+      description: service.description || "",
+      base_price: service.base_price ?? "",
+      is_active: service.is_active !== false,
+    };
+  }
+  function updateServiceDraft(service, field, value) {
+    setServiceDrafts((current) => ({
+      ...current,
+      [service.id]: { ...getServiceDraft(service), ...current[service.id], [field]: value },
+    }));
+  }
+  async function saveService(service) {
+    const draft = getServiceDraft(service);
+    setSavingServiceId(service.id); setError("");
+    try {
+      await invokeCrmFunction("crm-admin", { action:"save_service", id:service.id, ...draft, base_price:Number(draft.base_price || 0) });
+      setServiceDrafts((current) => { const next={...current}; delete next[service.id]; return next; });
+      await loadOrders();
+    } catch(err) { setError(err instanceof Error ? err.message : "Не удалось сохранить услугу"); }
+    finally { setSavingServiceId(null); }
+  }
+  async function createService(event) {
+    event.preventDefault(); setSavingServiceId("new"); setError("");
+    try {
+      await invokeCrmFunction("crm-admin", { action:"save_service", ...newService, base_price:Number(newService.base_price || 0) });
+      setNewService({ name:"", description:"", base_price:"", is_active:true });
+      await loadOrders();
+    } catch(err) { setError(err instanceof Error ? err.message : "Не удалось добавить услугу"); }
+    finally { setSavingServiceId(null); }
+  }
+
   async function editCustomerQuick(customer) {
     const first_name=prompt("Имя",customer.first_name||""); if(first_name===null)return;
     const last_name=prompt("Фамилия",customer.last_name||""); if(last_name===null)return;
@@ -501,7 +538,7 @@ export default function CrmApp() {
 
           {activePage === "warehouse" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Остатки материалов</h2><p>{adminData.inventory.length} позиций</p></div><Boxes size={20}/></div><div className="crmInventoryList">{adminData.inventory.length ? adminData.inventory.map((item)=><div className={`crmInventoryRow ${Number(item.quantity)<=Number(item.min_quantity)?"crmInventoryLow":""}`} key={item.id}><div><strong>{item.name}</strong><span>{formatPrice(item.price)} / {item.unit}</span></div><div><span>Остаток</span><strong>{item.quantity} {item.unit}</strong></div><div><span>Минимум</span><strong>{item.min_quantity} {item.unit}</strong></div></div>) : <div className="crmEmptyState">Добавьте первый материал</div>}</div></div><form className="crmPanel crmV4Form" onSubmit={saveInventory}><div className="crmPanelHeader"><div><h2>Добавить материал</h2><p>Контроль складских остатков</p></div><Plus size={20}/></div><label>Название<input required value={inventoryForm.name} onChange={(e)=>setInventoryForm({...inventoryForm,name:e.target.value})}/></label><div className="crmFormRow"><label>Ед. изм.<input value={inventoryForm.unit} onChange={(e)=>setInventoryForm({...inventoryForm,unit:e.target.value})}/></label><label>Остаток<input type="number" min="0" step="0.01" value={inventoryForm.quantity} onChange={(e)=>setInventoryForm({...inventoryForm,quantity:e.target.value})}/></label></div><div className="crmFormRow"><label>Мин. остаток<input type="number" min="0" step="0.01" value={inventoryForm.min_quantity} onChange={(e)=>setInventoryForm({...inventoryForm,min_quantity:e.target.value})}/></label><label>Цена<input type="number" min="0" value={inventoryForm.price} onChange={(e)=>setInventoryForm({...inventoryForm,price:e.target.value})}/></label></div><button className="crmCreateButton" type="submit"><Save size={17}/>Сохранить</button></form></div></section>}
 
-          {activePage === "settings" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Услуги и цены</h2><p>Каталог GarageFlow</p></div><Wrench size={20}/></div><div className="crmSettingsList">{adminData.services.map((svc)=><div className="crmSettingsRow" key={svc.id}><div><strong>{svc.name}</strong><span>{svc.description||"Без описания"}</span></div><strong>{formatPrice(svc.base_price)}</strong></div>)}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Сотрудники</h2><p>Доступ к CRM</p></div><Users size={20}/></div><div className="crmSettingsList">{adminData.employees.map((emp)=><div className="crmSettingsRow" key={emp.id}><div><strong>{emp.display_name||"Сотрудник"}</strong><span>{emp.role}</span></div><span className={emp.is_active?"crmActiveDot":"crmInactiveDot"}>{emp.is_active?"Активен":"Отключён"}</span></div>)}</div><p className="crmHint">Создание Auth-пользователей оставлено в Supabase, чтобы не передавать пароли через CRM.</p></div></div></section>}
+          {activePage === "settings" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Услуги и цены</h2><p>Изменения применяются к новым заказам</p></div><Wrench size={20}/></div>{employee?.role === "admin" ? <><div className="crmServiceEditorList">{adminData.services.map((svc)=>{const draft=getServiceDraft(svc);return <div className={`crmServiceEditor ${draft.is_active?"":"crmServiceEditorDisabled"}`} key={svc.id}><div className="crmServiceEditorFields"><label>Название<input value={draft.name} onChange={(e)=>updateServiceDraft(svc,"name",e.target.value)}/></label><label>Цена, ₽<input type="number" min="0" step="1" value={draft.base_price} onChange={(e)=>updateServiceDraft(svc,"base_price",e.target.value)}/></label><label className="crmServiceDescription">Описание<input value={draft.description} onChange={(e)=>updateServiceDraft(svc,"description",e.target.value)}/></label></div><div className="crmServiceEditorActions"><label className="crmServiceToggle"><input type="checkbox" checked={draft.is_active} onChange={(e)=>updateServiceDraft(svc,"is_active",e.target.checked)}/><span>{draft.is_active?"Активна":"Отключена"}</span></label><button className="crmCreateButton" type="button" disabled={savingServiceId===svc.id} onClick={()=>saveService(svc)}><Save size={16}/>{savingServiceId===svc.id?"Сохраняем...":"Сохранить"}</button></div></div>})}</div><form className="crmNewServiceForm" onSubmit={createService}><div><h3>Добавить услугу</h3><p>Новая услуга сразу появится в каталоге и при создании заказа</p></div><div className="crmFormRow"><label>Название<input required value={newService.name} onChange={(e)=>setNewService({...newService,name:e.target.value})}/></label><label>Цена, ₽<input required type="number" min="0" step="1" value={newService.base_price} onChange={(e)=>setNewService({...newService,base_price:e.target.value})}/></label></div><label>Описание<input value={newService.description} onChange={(e)=>setNewService({...newService,description:e.target.value})}/></label><button className="crmCreateButton" type="submit" disabled={savingServiceId==="new"}><Plus size={16}/>{savingServiceId==="new"?"Добавляем...":"Добавить услугу"}</button></form></> : <p className="crmHint">Изменять услуги и цены может только администратор.</p>}</div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Сотрудники</h2><p>Доступ к CRM</p></div><Users size={20}/></div><div className="crmSettingsList">{adminData.employees.map((emp)=><div className="crmSettingsRow" key={emp.id}><div><strong>{emp.display_name||"Сотрудник"}</strong><span>{emp.role}</span></div><span className={emp.is_active?"crmActiveDot":"crmInactiveDot"}>{emp.is_active?"Активен":"Отключён"}</span></div>)}</div><p className="crmHint">Создание Auth-пользователей оставлено в Supabase, чтобы не передавать пароли через CRM.</p></div></div></section>}
 
           {activePage === "analytics" && <>
             <section className="crmStats crmStatsFive">
