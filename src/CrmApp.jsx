@@ -103,6 +103,10 @@ export default function CrmApp() {
   const [savingServiceId, setSavingServiceId] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({ status_enabled:true, price_enabled:true, schedule_enabled:true });
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
+  const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null });
+  const [productionLoading, setProductionLoading] = useState(false);
+  const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [materialDraft, setMaterialDraft] = useState({ inventory_item_id: "", quantity: "" });
 
   useEffect(() => {
     let mounted = true;
@@ -181,6 +185,7 @@ export default function CrmApp() {
     setSaveMessage(""); setError(""); setSelectedOrder(order);
     setOrderHistory([]);
     invokeCrmFunction("crm-admin", { action:"history", order_id:order.id }).then((data)=>setOrderHistory(data.history||[])).catch(()=>setOrderHistory([]));
+    loadProduction(order.id);
   }
   function goToOrder(order) { setActivePage("orders"); openOrder(order); }
 
@@ -188,6 +193,65 @@ export default function CrmApp() {
     try { await invokeCrmFunction("crm-notify", { action:"send", order_id:orderId, notification_type:notificationType }); }
     catch (notifyError) { console.error("crm-notify", notifyError); }
   }
+  async function loadProduction(orderId) {
+    setProductionLoading(true);
+    try {
+      const data = await invokeCrmFunction("crm-admin", { action:"production_snapshot", order_id:orderId });
+      setProductionData({
+        tasks: data.tasks || [],
+        materials: data.materials || [],
+        assigned_employee_id: data.assigned_employee_id || null,
+      });
+    } catch (err) {
+      console.error("production_snapshot", err);
+      setProductionData({ tasks: [], materials: [], assigned_employee_id: null });
+    } finally {
+      setProductionLoading(false);
+    }
+  }
+
+  async function assignEmployee(employeeId) {
+    if (!selectedOrder) return;
+    try {
+      await invokeCrmFunction("crm-admin", { action:"assign_employee", order_id:selectedOrder.id, employee_id:employeeId ? Number(employeeId) : null });
+      setProductionData((c)=>({...c,assigned_employee_id:employeeId ? Number(employeeId) : null}));
+      setSaveMessage("Ответственный назначен");
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось назначить сотрудника"); }
+  }
+
+  async function addProductionTask(event) {
+    event.preventDefault();
+    if (!selectedOrder || !newTaskTitle.trim()) return;
+    try {
+      await invokeCrmFunction("crm-admin", { action:"add_production_task", order_id:selectedOrder.id, title:newTaskTitle.trim() });
+      setNewTaskTitle("");
+      await loadProduction(selectedOrder.id);
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось добавить этап"); }
+  }
+
+  async function toggleProductionTask(task) {
+    if (!selectedOrder) return;
+    try {
+      await invokeCrmFunction("crm-admin", { action:"toggle_production_task", task_id:task.id, is_done:!task.is_done });
+      await loadProduction(selectedOrder.id);
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось изменить этап"); }
+  }
+
+  async function addOrderMaterial(event) {
+    event.preventDefault();
+    if (!selectedOrder || !materialDraft.inventory_item_id || !materialDraft.quantity) return;
+    try {
+      await invokeCrmFunction("crm-admin", {
+        action:"add_order_material", order_id:selectedOrder.id,
+        inventory_item_id:Number(materialDraft.inventory_item_id), quantity:Number(materialDraft.quantity)
+      });
+      setMaterialDraft({ inventory_item_id:"", quantity:"" });
+      await loadProduction(selectedOrder.id);
+      const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
+      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[] });
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось списать материал"); }
+  }
+
   async function saveNotificationSettings() {
     setSavingNotificationSettings(true); setError("");
     try {
@@ -599,6 +663,34 @@ export default function CrmApp() {
         <div className="crmModalSection"><span className="crmModalLabel">Дата и время записи</span><input className="crmEditInput" type="datetime-local" value={editingOrder.scheduled_at} onChange={(e)=>setEditingOrder((c)=>({...c,scheduled_at:e.target.value}))}/></div>
         <div className="crmModalSection"><span className="crmModalLabel">Итоговая стоимость</span><div className="crmPriceInputWrap"><input className="crmEditInput" type="number" min="0" step="1" value={editingOrder.final_price} onChange={(e)=>setEditingOrder((c)=>({...c,final_price:e.target.value}))} placeholder="Например, 52000"/><span>₽</span></div></div>
         <div className="crmModalSection"><span className="crmModalLabel">Комментарий менеджера</span><textarea className="crmEditTextarea" value={editingOrder.manager_comment} onChange={(e)=>setEditingOrder((c)=>({...c,manager_comment:e.target.value}))} placeholder="Например: клиент согласовал дополнительную защиту арок" rows={4}/></div>
+        <div className="crmModalSection crmProductionSection">
+          <span className="crmModalLabel">Производство</span>
+          {productionLoading ? <div className="crmEmptyState">Загружаем производство...</div> : <>
+            <label className="crmProductionAssignee">Ответственный
+              <select value={productionData.assigned_employee_id || ""} onChange={(e)=>assignEmployee(e.target.value)}>
+                <option value="">Не назначен</option>
+                {adminData.employees.filter((x)=>x.is_active).map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name || `Сотрудник #${emp.id}`}</option>)}
+              </select>
+            </label>
+            <div className="crmProductionTasks">
+              {productionData.tasks.map((task)=><button type="button" key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`} onClick={()=>toggleProductionTask(task)}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></button>)}
+              {!productionData.tasks.length && <div className="crmEmptyState">Этапов производства пока нет</div>}
+            </div>
+            <form className="crmProductionAdd" onSubmit={addProductionTask}><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/><button type="submit">Добавить этап</button></form>
+          </>}
+        </div>
+        <div className="crmModalSection crmProductionSection">
+          <span className="crmModalLabel">Материалы заказа</span>
+          <div className="crmOrderMaterials">
+            {productionData.materials.map((item)=><div className="crmOrderMaterial" key={item.id}><div><strong>{item.inventory_item?.name || "Материал"}</strong><span>{formatDate(item.created_at)}</span></div><strong>{item.quantity} {item.inventory_item?.unit || ""}</strong></div>)}
+            {!productionData.materials.length && <div className="crmEmptyState">Материалы ещё не списывались</div>}
+          </div>
+          <form className="crmMaterialAdd" onSubmit={addOrderMaterial}>
+            <select value={materialDraft.inventory_item_id} onChange={(e)=>setMaterialDraft({...materialDraft,inventory_item_id:e.target.value})}><option value="">Выберите материал</option>{adminData.inventory.map((item)=><option key={item.id} value={item.id}>{item.name} · остаток {item.quantity} {item.unit}</option>)}</select>
+            <input type="number" min="0.01" step="0.01" value={materialDraft.quantity} onChange={(e)=>setMaterialDraft({...materialDraft,quantity:e.target.value})} placeholder="Количество"/>
+            <button type="submit">Списать</button>
+          </form>
+        </div>
         {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
         <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>
         <div className="crmModalDate"><Clock3 size={16}/>Создан {formatDate(selectedOrder.created_at)}</div>
