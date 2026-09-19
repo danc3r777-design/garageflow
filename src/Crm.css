@@ -876,3 +876,20 @@
 
 /* GarageFlow v6 — Telegram notifications */
 .crmNotifySettings{display:grid;gap:12px;margin:16px 0}.crmNotifySettings label{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1px solid #e7ebf1;border-radius:14px;background:#fff;cursor:pointer}.crmNotifySettings input{width:18px;height:18px;margin-top:2px}.crmNotifySettings span{display:grid;gap:4px}.crmNotifySettings strong{font-size:14px;color:#13233d}.crmNotifySettings small{font-size:12px;line-height:1.45;color:#7b8799}
+
+/* GarageFlow v7 — production */
+.crmProductionSection { display: grid; gap: 12px; }
+.crmProductionAssignee { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.crmProductionAssignee select, .crmProductionAdd input, .crmMaterialAdd select, .crmMaterialAdd input { width: 100%; border: 1px solid #dfe3ea; border-radius: 10px; padding: 10px 12px; background: #fff; font: inherit; }
+.crmProductionTasks { display: grid; gap: 8px; }
+.crmProductionTask { display: flex; gap: 9px; align-items: center; width: 100%; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; background: #fff; text-align: left; cursor: pointer; }
+.crmProductionTaskDone { opacity: .65; }
+.crmProductionTaskDone strong { text-decoration: line-through; }
+.crmProductionAdd, .crmMaterialAdd { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.crmProductionAdd button, .crmMaterialAdd button { border: 0; border-radius: 10px; padding: 10px 14px; background: #111827; color: #fff; font-weight: 800; cursor: pointer; }
+.crmMaterialAdd { grid-template-columns: minmax(0, 1fr) 120px auto; }
+.crmOrderMaterials { display: grid; gap: 8px; }
+.crmOrderMaterial { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.crmOrderMaterial div { display: grid; gap: 3px; }
+.crmOrderMaterial span { font-size: 12px; color: #6b7280; }
+@media (max-width: 720px) { .crmMaterialAdd, .crmProductionAdd { grid-template-columns: 1fr; } }
