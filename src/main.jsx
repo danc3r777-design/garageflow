@@ -6,6 +6,7 @@ import { createRoot } from "react-dom/client";
 
 import App from "./App.jsx";
 import CrmApp from "./CrmApp.jsx";
+import "./ClientV5.css";
 
 import "./index.css";
 import "./Crm.css";
