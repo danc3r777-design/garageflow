@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
   BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
   CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
-  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer,
+  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send,
 } from "lucide-react";
 
 const columns = [
@@ -105,6 +105,7 @@ export default function CrmApp() {
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
   const [companySettings, setCompanySettings] = useState({ company_name:"GarageFlow", legal_name:"", inn:"", kpp:"", address:"", phone:"", email:"", bank_details:"", document_footer:"" });
   const [savingCompanySettings, setSavingCompanySettings] = useState(false);
+  const [sendingDocument, setSendingDocument] = useState("");
   const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
   const [productionLoading, setProductionLoading] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
@@ -338,6 +339,77 @@ export default function CrmApp() {
       @media print{body{background:#fff}.page{margin:0;box-shadow:none;width:auto;min-height:auto;padding:12mm 12mm}@page{size:A4;margin:0}}
     </style></head><body><div class="page"><div class="head"><div><img class="logo" src="${logoUrl}" alt="Furgon Club Garage"><div class="company">${companyBlock}</div></div><div class="contacts">${contacts}</div></div>${isQuote?quoteBody:workBody}<div class="footer">${escapeDocument(companySettings.bank_details||"")}\n${escapeDocument(companySettings.document_footer||"")}</div></div><script>window.onload=()=>setTimeout(()=>window.print(),500)<\/script></body></html>`);
     w.document.close();
+  }
+
+  async function imageToDataUrl(url) {
+    const response = await fetch(url);
+    if (!response.ok) throw new Error("Не удалось загрузить логотип.");
+    const blob = await response.blob();
+    return await new Promise((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(reader.result);
+      reader.onerror = reject;
+      reader.readAsDataURL(blob);
+    });
+  }
+
+  async function sendOrderDocumentToTelegram(type) {
+    if (!selectedOrder || sendingDocument) return;
+    const isQuote = type === "quote";
+    setSendingDocument(type); setError(""); setSaveMessage("");
+    try {
+      const pdfMakeModule = await import("pdfmake/build/pdfmake");
+      const pdfFontsModule = await import("pdfmake/build/vfs_fonts");
+      const pdfMake = pdfMakeModule.default || pdfMakeModule;
+      const pdfFonts = pdfFontsModule.default || pdfFontsModule;
+      if (pdfMake.addVirtualFileSystem) pdfMake.addVirtualFileSystem(pdfFonts);
+      else pdfMake.vfs = pdfFonts?.pdfMake?.vfs || pdfFonts?.vfs || pdfFonts;
+
+      const logo = await imageToDataUrl(`${window.location.origin}/furgon-club-logo.jpeg`);
+      const items = selectedOrder.items || [];
+      const itemsTotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
+      const total = orderAmount(selectedOrder);
+      const adjustment = total - itemsTotal;
+      const customerName = getCustomerName(selectedOrder.customer);
+      const vehicleName = getVehicleName(selectedOrder.vehicle);
+      const today = new Date().toLocaleDateString("ru-RU");
+      const tableBody = [["№","Работа","Материал","Кол.","Цена","Сумма"], ...items.map((item,index)=>[
+        String(index+1), String(item.service_name||""), String(item.material||"—"), String(item.quantity||1),
+        formatPrice(item.price), formatPrice(Number(item.price||0)*Number(item.quantity||1))
+      ])];
+      const summary = [
+        { columns:[{text:"Стоимость по позициям",color:"#4b5563"},{text:formatPrice(itemsTotal),bold:true,alignment:"right"}], margin:[0,5,0,0] },
+        ...(adjustment !== 0 ? [{ columns:[{text:"Корректировка согласованной стоимости",color:"#4b5563"},{text:`${adjustment>0?"+":""}${formatPrice(adjustment)}`,bold:true,alignment:"right"}], margin:[0,5,0,0] }] : []),
+        { columns:[{text:"ИТОГО К ОПЛАТЕ",bold:true},{text:formatPrice(total),bold:true,fontSize:16,alignment:"right"}], margin:[0,10,0,0] }
+      ];
+      const docDefinition = {
+        pageSize:"A4", pageMargins:[42,38,42,42], defaultStyle:{font:"Roboto",fontSize:10,color:"#111827"},
+        content:[
+          {columns:[{image:logo,width:190},{stack:[companySettings.phone||"",companySettings.email||""],alignment:"right",color:"#374151"}]},
+          {text:companySettings.legal_name||companySettings.company_name||"GarageFlow",margin:[0,8,0,0],bold:true},
+          {text:[companySettings.inn?`ИНН ${companySettings.inn}`:"",companySettings.address||""].filter(Boolean).join(" · "),color:"#4b5563",margin:[0,2,0,12]},
+          {canvas:[{type:"line",x1:0,y1:0,x2:510,y2:0,lineWidth:2,lineColor:"#24d8cf"}],margin:[0,0,0,18]},
+          {text:isQuote?"ПРЕДЛОЖЕНИЕ ДЛЯ КЛИЕНТА":"РАБОЧИЙ ДОКУМЕНТ",fontSize:8,bold:true,color:"#0f9f99",characterSpacing:1.2},
+          {text:isQuote?"Коммерческое предложение":`Заказ-наряд №${selectedOrder.id}`,fontSize:22,bold:true,margin:[0,3,0,3]},
+          {text:isQuote?`№${selectedOrder.id} от ${today}`:`Дата: ${today}`,color:"#6b7280",margin:[0,0,0,16]},
+          {table:{widths:["*","*"],body:[[
+            {stack:[{text:isQuote?"КЛИЕНТ":"ЗАКАЗЧИК",fontSize:8,bold:true,color:"#6b7280"},{text:customerName,bold:true,margin:[0,4,0,0]},{text:selectedOrder.customer?.phone||"",color:"#6b7280",fontSize:9}]},
+            {stack:[{text:"АВТОМОБИЛЬ",fontSize:8,bold:true,color:"#6b7280"},{text:vehicleName,bold:true,margin:[0,4,0,0]},{text:[selectedOrder.vehicle?.license_plate?`Госномер: ${selectedOrder.vehicle.license_plate}`:"",selectedOrder.vehicle?.vin?`VIN: ${selectedOrder.vehicle.vin}`:""].filter(Boolean).join(" · "),color:"#6b7280",fontSize:9}]}
+          ]]},layout:"lightHorizontalLines",margin:[0,0,0,16]},
+          ...(!isQuote && selectedOrder.scheduled_at ? [{text:`Дата и время записи: ${formatDate(selectedOrder.scheduled_at)}`,bold:true,margin:[0,0,0,12]}] : []),
+          {table:{headerRows:1,widths:[22,"*",95,30,58,62],body:tableBody},layout:"lightHorizontalLines"},
+          {stack:summary,margin:[150,12,0,0]},
+          ...(selectedOrder.manager_comment ? [{text:`Комментарий: ${selectedOrder.manager_comment}`,margin:[0,18,0,0]}] : []),
+          ...(isQuote ? [{text:"Условия предложения",bold:true,margin:[0,22,0,4]},{text:"Окончательный состав работ и сроки согласовываются с клиентом перед началом выполнения заказа.",color:"#4b5563"}] : [{text:"Приёмка работ",bold:true,margin:[0,24,0,4]},{text:"Работы по заказ-наряду выполнены. Заказчик подтверждает получение автомобиля и результат выполненных работ.",color:"#4b5563"},{columns:[{text:"Исполнитель: ____________________",margin:[0,35,0,0]},{text:"Заказчик: ____________________",margin:[20,35,0,0]}]}]),
+          {text:[companySettings.bank_details||"",companySettings.document_footer||""].filter(Boolean).join("\n"),fontSize:8,color:"#6b7280",margin:[0,28,0,0]}
+        ]
+      };
+      const pdfBase64 = await new Promise((resolve) => pdfMake.createPdf(docDefinition).getBase64(resolve));
+      const data = await invokeCrmFunction("crm-notify", { action:"send_document", order_id:selectedOrder.id, document_type:type, pdf_base64:pdfBase64 });
+      if (data.skipped) throw new Error(data.reason === "customer_has_no_telegram" ? "У клиента нет Telegram ID." : "Документ не отправлен.");
+      setSaveMessage(`${isQuote ? "Коммерческое предложение" : "Заказ-наряд"} отправлен клиенту в Telegram`);
+    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось отправить документ в Telegram."); }
+    finally { setSendingDocument(""); }
   }
 
   async function saveNotificationSettings() {
@@ -813,7 +885,7 @@ export default function CrmApp() {
         {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
         <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>
         <div className="crmModalDate"><Clock3 size={16}/>Создан {formatDate(selectedOrder.created_at)}</div>
-        <div className="crmModalSection crmDocumentsSection"><span className="crmModalLabel">Документы</span><p className="crmDocumentsHint">Документ откроется в печатном виде. В окне печати можно выбрать «Сохранить как PDF».</p><div className="crmDocumentActions"><button type="button" onClick={()=>printOrderDocument("quote")}><FileText size={17}/>Коммерческое предложение</button><button type="button" onClick={()=>printOrderDocument("work_order")}><Printer size={17}/>Заказ-наряд / PDF</button></div></div><div className="crmModalSection"><span className="crmModalLabel">История заказа</span><div className="crmHistoryList">{orderHistory.length ? orderHistory.map((event)=><div className="crmHistoryItem" key={event.id}><History size={16}/><div><strong>{event.description}</strong><span>{formatDate(event.created_at)}{event.employee?.display_name?` · ${event.employee.display_name}`:""}</span></div></div>) : <div className="crmEmptyState">История появится после изменений в версии v4</div>}</div></div><div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>
+        <div className="crmModalSection crmDocumentsSection"><span className="crmModalLabel">Документы</span><p className="crmDocumentsHint">Документ откроется в печатном виде. В окне печати можно выбрать «Сохранить как PDF».</p><div className="crmDocumentActions"><button type="button" onClick={()=>printOrderDocument("quote")}><FileText size={17}/>Коммерческое предложение</button><button type="button" onClick={()=>sendOrderDocumentToTelegram("quote")} disabled={!!sendingDocument}><Send size={17}/>{sendingDocument==="quote"?"Отправляем...":"КП → Telegram"}</button><button type="button" onClick={()=>printOrderDocument("work_order")}><Printer size={17}/>Заказ-наряд / PDF</button><button type="button" onClick={()=>sendOrderDocumentToTelegram("work_order")} disabled={!!sendingDocument}><Send size={17}/>{sendingDocument==="work_order"?"Отправляем...":"Заказ-наряд → Telegram"}</button></div></div><div className="crmModalSection"><span className="crmModalLabel">История заказа</span><div className="crmHistoryList">{orderHistory.length ? orderHistory.map((event)=><div className="crmHistoryItem" key={event.id}><History size={16}/><div><strong>{event.description}</strong><span>{formatDate(event.created_at)}{event.employee?.display_name?` · ${event.employee.display_name}`:""}</span></div></div>) : <div className="crmEmptyState">История появится после изменений в версии v4</div>}</div></div><div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>
       </div></div>}
     </div>
   );
