@@ -93,7 +93,7 @@ export default function CrmApp() {
     return new Date(now.getFullYear(), now.getMonth(), 1);
   });
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
-  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [] });
+  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [], economics: [] });
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [orderHistory, setOrderHistory] = useState([]);
   const [newOrder, setNewOrder] = useState({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"" });
@@ -103,10 +103,12 @@ export default function CrmApp() {
   const [savingServiceId, setSavingServiceId] = useState(null);
   const [notificationSettings, setNotificationSettings] = useState({ status_enabled:true, price_enabled:true, schedule_enabled:true });
   const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
-  const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null });
+  const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
   const [productionLoading, setProductionLoading] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
   const [materialDraft, setMaterialDraft] = useState({ inventory_item_id: "", quantity: "" });
+  const [laborCostDraft, setLaborCostDraft] = useState("0");
+  const [savingEconomics, setSavingEconomics] = useState(false);
 
   useEffect(() => {
     let mounted = true;
@@ -144,7 +146,7 @@ export default function CrmApp() {
       setOrders(data.orders || []);
       try {
         const extra = await invokeCrmFunction("crm-admin", { action: "snapshot" });
-        setAdminData({ services: extra.services || [], inventory: extra.inventory || [], employees: extra.employees || [] });
+        setAdminData({ services: extra.services || [], inventory: extra.inventory || [], employees: extra.employees || [], economics: extra.economics || [] });
         try { const ns = await invokeCrmFunction("crm-notify", { action:"get_settings" }); if (ns.settings) setNotificationSettings(ns.settings); } catch (notifySettingsError) { console.error("crm-notify settings", notifySettingsError); }
       } catch (extraError) { console.error("crm-admin snapshot", extraError); }
       if (selectedOrder) {
@@ -201,10 +203,13 @@ export default function CrmApp() {
         tasks: data.tasks || [],
         materials: data.materials || [],
         assigned_employee_id: data.assigned_employee_id || null,
+        labor_cost: Number(data.labor_cost || 0),
       });
+      setLaborCostDraft(String(Number(data.labor_cost || 0)));
     } catch (err) {
       console.error("production_snapshot", err);
-      setProductionData({ tasks: [], materials: [], assigned_employee_id: null });
+      setProductionData({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
+      setLaborCostDraft("0");
     } finally {
       setProductionLoading(false);
     }
@@ -248,8 +253,25 @@ export default function CrmApp() {
       setMaterialDraft({ inventory_item_id:"", quantity:"" });
       await loadProduction(selectedOrder.id);
       const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
-      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[] });
+      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[] });
     } catch(err) { setError(err instanceof Error?err.message:"Не удалось списать материал"); }
+  }
+
+  async function saveOrderEconomics() {
+    if (!selectedOrder || savingEconomics) return;
+    const laborCost = Number(laborCostDraft || 0);
+    if (!Number.isFinite(laborCost) || laborCost < 0) { setError("Проверьте стоимость труда"); return; }
+    setSavingEconomics(true); setError("");
+    try {
+      await invokeCrmFunction("crm-admin", { action:"save_order_economics", order_id:selectedOrder.id, labor_cost:laborCost });
+      setProductionData((c)=>({...c,labor_cost:laborCost}));
+      const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
+      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[] });
+      const history = await invokeCrmFunction("crm-admin", { action:"history", order_id:selectedOrder.id });
+      setOrderHistory(history.history||[]);
+      setSaveMessage("Экономика заказа сохранена");
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось сохранить экономику заказа"); }
+    finally { setSavingEconomics(false); }
   }
 
   async function saveNotificationSettings() {
@@ -442,6 +464,19 @@ export default function CrmApp() {
   }, [scheduledOrders]);
 
   const totalRevenue = orders.filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + orderAmount(o), 0);
+  const economicsByOrder = useMemo(() => new Map((adminData.economics || []).map((x)=>[Number(x.order_id), x])), [adminData.economics]);
+  function getOrderEconomics(order) {
+    const saved = economicsByOrder.get(Number(order?.id)) || {};
+    const materialCost = Number(saved.material_cost || 0);
+    const laborCost = Number(saved.labor_cost || 0);
+    const revenue = orderAmount(order || {});
+    const cost = materialCost + laborCost;
+    const profit = revenue - cost;
+    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
+    return { revenue, materialCost, laborCost, cost, profit, margin };
+  }
+  const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.cost+=e.cost; acc.profit+=e.profit; return acc; }, {materialCost:0,laborCost:0,cost:0,profit:0});
+  const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
   const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
   const newOrders = orders.filter((o) => o.status === "new").length;
   const doneOrders = orders.filter((o) => o.status === "done").length;
@@ -485,6 +520,8 @@ export default function CrmApp() {
         label: new Intl.DateTimeFormat("ru-RU", { month: "short" }).format(d),
         orders: monthOrders.length,
         revenue: monthOrders.reduce((sum,o) => sum + orderAmount(o), 0),
+        cost: monthOrders.reduce((sum,o) => sum + getOrderEconomics(o).cost, 0),
+        profit: monthOrders.reduce((sum,o) => sum + getOrderEconomics(o).profit, 0),
       });
     }
     return result;
@@ -569,8 +606,10 @@ export default function CrmApp() {
               <div className="crmStat"><span>Новые заявки</span><strong>{newOrders}</strong></div>
               <div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div>
               <div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>
-              <div className="crmStat"><span>Клиентов</span><strong>{customers.length}</strong></div>
-              <div className="crmStat"><span>Сумма заказов</span><strong>{formatPrice(totalRevenue)}</strong></div>
+              <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
+              <div className="crmStat"><span>Себестоимость</span><strong>{formatPrice(businessEconomics.cost)}</strong></div>
+              <div className="crmStat"><span>Валовая прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></div>
+              <div className="crmStat"><span>Маржа</span><strong>{businessMargin.toFixed(1)}%</strong></div>
             </section>
             <section className="crmAttentionGrid">
               <button type="button" className={`crmAttentionCard ${todayOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>setActivePage("calendar")}><CalendarCheck size={21}/><div><span>Сегодня</span><strong>{todayOrders.length} записей</strong></div></button>
@@ -629,13 +668,13 @@ export default function CrmApp() {
           {activePage === "analytics" && <>
             <section className="crmStats crmStatsFive">
               <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
-              <div className="crmStat"><span>Средний чек</span><strong>{formatPrice(averageCheck)}</strong></div>
-              <div className="crmStat"><span>Заказов</span><strong>{nonCancelledOrders.length}</strong></div>
-              <div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>
-              <div className="crmStat"><span>Завершение</span><strong>{completionRate}%</strong></div>
+              <div className="crmStat"><span>Материалы</span><strong>{formatPrice(businessEconomics.materialCost)}</strong></div>
+              <div className="crmStat"><span>Труд</span><strong>{formatPrice(businessEconomics.laborCost)}</strong></div>
+              <div className="crmStat"><span>Прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></div>
+              <div className="crmStat"><span>Маржа</span><strong>{businessMargin.toFixed(1)}%</strong></div>
             </section>
             <section className="crmAnalyticsGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Выручка по месяцам</h2><p>Последние 6 месяцев</p></div><TrendingUp size={20}/></div><div className="crmRevenueChart">{monthlyStats.map((m)=><div className="crmRevenueColumn" key={m.key}><div className="crmRevenueValue">{m.revenue ? formatPrice(m.revenue) : "0 ₽"}</div><div className="crmRevenueBarWrap"><div className="crmRevenueBar" style={{height:`${Math.max(m.revenue ? 10 : 2,(m.revenue/maxMonthlyRevenue)*100)}%`}}/></div><strong>{m.label}</strong><span>{m.orders} заказ.</span></div>)}</div></div>
+              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Экономика по месяцам</h2><p>Выручка и валовая прибыль за последние 6 месяцев</p></div><TrendingUp size={20}/></div><div className="crmRevenueChart">{monthlyStats.map((m)=><div className="crmRevenueColumn" key={m.key}><div className="crmRevenueValue">{m.revenue ? formatPrice(m.revenue) : "0 ₽"}</div><div className="crmRevenueBarWrap"><div className="crmRevenueBar" style={{height:`${Math.max(m.revenue ? 10 : 2,(m.revenue/maxMonthlyRevenue)*100)}%`}}/></div><strong>{m.label}</strong><span>{m.orders} заказ. · прибыль {formatPrice(m.profit)}</span></div>)}</div></div>
               <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Популярные услуги</h2><p>По количеству в заказах</p></div><Wrench size={20}/></div><div className="crmServiceStats">{serviceStats.length ? serviceStats.map((item,index)=><div className="crmServiceStat" key={item.name}><div className="crmServiceRank">{index+1}</div><div><strong>{item.name}</strong><span>{item.count} шт. · {formatPrice(item.revenue)}</span></div></div>) : <div className="crmEmptyState">Пока недостаточно данных</div>}</div></div>
             </section>
             <section className="crmAnalyticsGrid">
@@ -682,7 +721,7 @@ export default function CrmApp() {
         <div className="crmModalSection crmProductionSection">
           <span className="crmModalLabel">Материалы заказа</span>
           <div className="crmOrderMaterials">
-            {productionData.materials.map((item)=><div className="crmOrderMaterial" key={item.id}><div><strong>{item.inventory_item?.name || "Материал"}</strong><span>{formatDate(item.created_at)}</span></div><strong>{item.quantity} {item.inventory_item?.unit || ""}</strong></div>)}
+            {productionData.materials.map((item)=><div className="crmOrderMaterial" key={item.id}><div><strong>{item.inventory_item?.name || "Материал"}</strong><span>{formatDate(item.created_at)}</span></div><strong>{item.quantity} {item.inventory_item?.unit || ""}<small>{item.unit_price != null ? ` · ${formatPrice(Number(item.quantity||0)*Number(item.unit_price||0))}` : ""}</small></strong></div>)}
             {!productionData.materials.length && <div className="crmEmptyState">Материалы ещё не списывались</div>}
           </div>
           <form className="crmMaterialAdd" onSubmit={addOrderMaterial}>
@@ -690,6 +729,20 @@ export default function CrmApp() {
             <input type="number" min="0.01" step="0.01" value={materialDraft.quantity} onChange={(e)=>setMaterialDraft({...materialDraft,quantity:e.target.value})} placeholder="Количество"/>
             <button type="submit">Списать</button>
           </form>
+        </div>
+        <div className="crmModalSection crmEconomicsSection">
+          <span className="crmModalLabel">Экономика заказа</span>
+          {(()=>{ const base=getOrderEconomics(selectedOrder); const materialCost=productionData.materials.reduce((sum,item)=>sum+Number(item.quantity||0)*Number(item.unit_price||0),0); const laborCost=Number(laborCostDraft||0); const cost=materialCost+laborCost; const profit=base.revenue-cost; const margin=base.revenue>0?(profit/base.revenue)*100:0; return <>
+            <div className="crmEconomicsGrid">
+              <div><span>Выручка</span><strong>{formatPrice(base.revenue)}</strong></div>
+              <div><span>Материалы</span><strong>{formatPrice(materialCost)}</strong></div>
+              <div><span>Труд</span><strong>{formatPrice(laborCost)}</strong></div>
+              <div><span>Себестоимость</span><strong>{formatPrice(cost)}</strong></div>
+              <div className={profit<0?"crmEconomicsNegative":"crmEconomicsPositive"}><span>Валовая прибыль</span><strong>{formatPrice(profit)}</strong></div>
+              <div><span>Маржа</span><strong>{margin.toFixed(1)}%</strong></div>
+            </div>
+            <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>
+          </>; })()}
         </div>
         {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
         <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>
