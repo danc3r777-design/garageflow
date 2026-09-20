@@ -7,7 +7,7 @@ import {
   Clock3, CalendarDays, Plus, Save, UserRound, RefreshCw, Home, FileText,
   Repeat2, Phone, Mail, Wrench, Download
 } from "lucide-react";
-
+ 
 const materialOptions = {
   "Пол": ["Ламинированная фанера", "Берёзовая фанера", "Алюминий"],
   "Стены": ["Ламинированная фанера", "Берёзовая фанера", "Композит"],
