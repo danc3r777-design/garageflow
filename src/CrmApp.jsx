@@ -146,18 +146,16 @@ export default function CrmApp() {
     return data;
   }
   async function loadOrders() {
-    setLoading(true); setError("");
+    setLoading(true);
+    setError("");
+
     try {
+      // Критичные для первого экрана данные загружаем первыми.
+      // Как только заказы получены, CRM уже можно показывать пользователю.
       const data = await invokeCrmFunction("crm-orders");
       setEmployee(data.employee);
       setOrders(data.orders || []);
-      try {
-        const extra = await invokeCrmFunction("crm-admin", { action: "snapshot" });
-        setAdminData({ services: extra.services || [], inventory: extra.inventory || [], employees: extra.employees || [], economics: extra.economics || [] });
-        try { const taskData = await invokeCrmFunction("crm-admin", { action:"tasks_snapshot" }); setCrmTasks(taskData.tasks||[]); } catch(taskError) { console.error("crm tasks", taskError); }
-        if (extra.company_settings) setCompanySettings((c)=>({...c,...extra.company_settings}));
-        try { const ns = await invokeCrmFunction("crm-notify", { action:"get_settings" }); if (ns.settings) setNotificationSettings(ns.settings); } catch (notifySettingsError) { console.error("crm-notify settings", notifySettingsError); }
-      } catch (extraError) { console.error("crm-admin snapshot", extraError); }
+
       if (selectedOrder) {
         const refreshed = (data.orders || []).find((o) => o.id === selectedOrder.id);
         if (refreshed) {
@@ -170,10 +168,51 @@ export default function CrmApp() {
           });
         }
       }
+
+      // Не держим весь интерфейс заблокированным, пока грузятся справочники,
+      // задачи и настройки уведомлений.
+      setLoading(false);
+
+      // Эти три запроса независимы — запускаем одновременно в фоне.
+      const [snapshotResult, tasksResult, notifyResult] = await Promise.allSettled([
+        invokeCrmFunction("crm-admin", { action: "snapshot" }),
+        invokeCrmFunction("crm-admin", { action: "tasks_snapshot" }),
+        invokeCrmFunction("crm-notify", { action: "get_settings" }),
+      ]);
+
+      if (snapshotResult.status === "fulfilled") {
+        const extra = snapshotResult.value;
+        setAdminData({
+          services: extra.services || [],
+          inventory: extra.inventory || [],
+          employees: extra.employees || [],
+          economics: extra.economics || [],
+        });
+        if (extra.company_settings) {
+          setCompanySettings((current) => ({ ...current, ...extra.company_settings }));
+        }
+      } else {
+        console.error("crm-admin snapshot", snapshotResult.reason);
+      }
+
+      if (tasksResult.status === "fulfilled") {
+        setCrmTasks(tasksResult.value.tasks || []);
+      } else {
+        console.error("crm tasks", tasksResult.reason);
+      }
+
+      if (notifyResult.status === "fulfilled") {
+        if (notifyResult.value.settings) setNotificationSettings(notifyResult.value.settings);
+      } else {
+        console.error("crm-notify settings", notifyResult.reason);
+      }
     } catch (err) {
-      console.error(err); setError(err instanceof Error ? err.message : "Ошибка загрузки CRM.");
-    } finally { setLoading(false); }
+      console.error(err);
+      setError(err instanceof Error ? err.message : "Ошибка загрузки CRM.");
+      setLoading(false);
+    }
   }
+
   async function login(event) {
     event.preventDefault(); setLoginLoading(true); setLoginError("");
     try {
