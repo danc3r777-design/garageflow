@@ -949,3 +949,78 @@
   .crmV4Grid,.crmDataGrid,.crmAnalyticsGrid{grid-template-columns:1fr!important}.crmInventoryRow,.crmSettingsRow{grid-template-columns:1fr!important;gap:8px!important}.crmFormRow,.crmTaskForm,.crmOperationalRow{grid-template-columns:1fr!important}
 }
 @media(max-width:380px){.crmMenuItem{font-size:8px!important}.crmMain{padding-left:8px!important;padding-right:8px!important}.crmWeekPlannerDay{min-width:84vw!important}}
+
+/* GarageFlow v14.2.1: mobile month calendar width hotfix */
+@media (max-width:700px) {
+  .crmMonthSection {
+    width:100%;
+    max-width:100%;
+    overflow:hidden!important;
+  }
+  .crmWeekdays,
+  .crmMonthGrid {
+    width:100%!important;
+    min-width:0!important;
+    max-width:100%!important;
+    grid-template-columns:repeat(7,minmax(0,1fr))!important;
+    gap:3px!important;
+  }
+  .crmWeekdays span {
+    min-width:0;
+    font-size:9px!important;
+  }
+  .crmMonthGrid {
+    overflow:visible!important;
+  }
+  .crmMonthDay {
+    min-width:0!important;
+    min-height:64px!important;
+    border-radius:9px!important;
+    padding:6px 4px!important;
+    overflow:hidden;
+  }
+  .crmMonthNumber {
+    min-width:0;
+    margin-bottom:3px!important;
+    font-size:11px!important;
+    gap:2px!important;
+  }
+  .crmMonthEvent {
+    margin-top:3px!important;
+    padding:3px!important;
+    border-radius:5px!important;
+    font-size:7px!important;
+  }
+  .crmMonthDay small {
+    margin-top:2px!important;
+    font-size:7px!important;
+  }
+  .crmLoadBadge {
+    min-width:16px!important;
+    width:16px!important;
+    height:16px!important;
+    padding:0!important;
+    font-size:8px!important;
+  }
+  .crmMonthToolbar {
+    width:100%;
+    gap:8px!important;
+    margin-bottom:12px!important;
+  }
+  .crmMonthToolbar h2 {
+    flex:1;
+    min-width:0!important;
+    font-size:16px!important;
+    white-space:nowrap;
+  }
+  .crmMonthToolbar button {
+    width:40px!important;
+    min-width:40px!important;
+    height:40px!important;
+  }
+}
+@media (max-width:380px) {
+  .crmWeekdays,.crmMonthGrid { gap:2px!important; }
+  .crmMonthDay { min-height:58px!important; padding:5px 3px!important; }
+  .crmMonthNumber { font-size:10px!important; }
+}
