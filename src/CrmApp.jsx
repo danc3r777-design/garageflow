@@ -998,10 +998,11 @@ export default function CrmApp() {
               </select>
             </label> : <div className="crmMasterNotice">Рабочий режим мастера: этапы производства, материалы и задачи.</div>}
             <div className="crmProductionTasks">
-              {productionData.tasks.map((task)=><button type="button" key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`} onClick={()=>toggleProductionTask(task)}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></button>)}
+              {productionData.tasks.map((task)=> employee?.role === "manager" ? <div key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></div> : <button type="button" key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`} onClick={()=>toggleProductionTask(task)}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></button>)}
               {!productionData.tasks.length && <div className="crmEmptyState">Этапов производства пока нет</div>}
             </div>
-            <form className="crmProductionAdd" onSubmit={addProductionTask}><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/><button type="submit">Добавить этап</button></form>
+            {employee?.role !== "manager" && <form className="crmProductionAdd" onSubmit={addProductionTask}><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/><button type="submit">Добавить этап</button></form>}
+            {employee?.role === "manager" && <div className="crmMasterNotice">Производство доступно менеджеру только для просмотра. Исполнение ведёт назначенный мастер.</div>}
           </>}
         </div>
         <div className="crmModalSection crmProductionSection">
@@ -1010,11 +1011,11 @@ export default function CrmApp() {
             {productionData.materials.map((item)=><div className="crmOrderMaterial" key={item.id}><div><strong>{item.inventory_item?.name || "Материал"}</strong><span>{formatDate(item.created_at)}</span></div><strong>{item.quantity} {item.inventory_item?.unit || ""}<small>{item.unit_price != null ? ` · ${formatPrice(Number(item.quantity||0)*Number(item.unit_price||0))}` : ""}</small></strong></div>)}
             {!productionData.materials.length && <div className="crmEmptyState">Материалы ещё не списывались</div>}
           </div>
-          <form className="crmMaterialAdd" onSubmit={addOrderMaterial}>
+          {employee?.role !== "manager" && <form className="crmMaterialAdd" onSubmit={addOrderMaterial}>
             <select value={materialDraft.inventory_item_id} onChange={(e)=>setMaterialDraft({...materialDraft,inventory_item_id:e.target.value})}><option value="">Выберите материал</option>{adminData.inventory.map((item)=><option key={item.id} value={item.id}>{item.name} · остаток {item.quantity} {item.unit}</option>)}</select>
             <input type="number" min="0.01" step="0.01" value={materialDraft.quantity} onChange={(e)=>setMaterialDraft({...materialDraft,quantity:e.target.value})} placeholder="Количество"/>
             <button type="submit">Списать</button>
-          </form>
+          </form>}
         </div>
         {employee?.role !== "master" && <div className="crmModalSection crmEconomicsSection">
           <span className="crmModalLabel">Экономика заказа</span>
@@ -1027,7 +1028,8 @@ export default function CrmApp() {
               <div className={profit<0?"crmEconomicsNegative":"crmEconomicsPositive"}><span>Валовая прибыль</span><strong>{formatPrice(profit)}</strong></div>
               <div><span>Маржа</span><strong>{margin.toFixed(1)}%</strong></div>
             </div>
-            <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>
+            {employee?.role === "admin" && <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>}
+            {employee?.role === "manager" && <div className="crmMasterNotice">Экономика доступна для просмотра. Фактическую стоимость труда изменяет администратор.</div>}
           </>; })()}
         </div>}
         {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
