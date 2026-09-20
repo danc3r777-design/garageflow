@@ -1,10 +1,11 @@
 import React, { useEffect, useMemo, useState } from "react";
 import { supabase } from "./supabase.js";
-import "./ClientV5.css";
+import "./ClientV11.css";
 import {
   Bell, ChevronRight, ChevronLeft, ClipboardList, Car, Headphones,
   SlidersHorizontal, Check, MessageSquare, CircleCheckBig, LoaderCircle,
-  Clock3, CalendarDays, Plus, Save, UserRound, RefreshCw
+  Clock3, CalendarDays, Plus, Save, UserRound, RefreshCw, Home, FileText,
+  Repeat2, Phone, Mail, Wrench, Download
 } from "lucide-react";
 
 const materialOptions = {
@@ -34,7 +35,7 @@ export default function App() {
   const [selectedVehicleId, setSelectedVehicleId] = useState(null);
   const [services, setServices] = useState([]);
   const [orders, setOrders] = useState([]);
-  const [screen, setScreen] = useState("configurator");
+  const [screen, setScreen] = useState("home");
   const [selectedMaterials, setSelectedMaterials] = useState({});
   const [comment, setComment] = useState("");
   const [creatingOrder, setCreatingOrder] = useState(false);
@@ -45,6 +46,8 @@ export default function App() {
   const [vehicleSaving, setVehicleSaving] = useState(false);
   const [profilePhone, setProfilePhone] = useState("");
   const [profileSaving, setProfileSaving] = useState(false);
+  const [company, setCompany] = useState(null);
+  const [documentBusy, setDocumentBusy] = useState(false);
 
   useEffect(() => {
     const tg = window.Telegram?.WebApp;
@@ -76,6 +79,7 @@ export default function App() {
       setSelectedVehicleId((current) => current && (result.vehicles || []).some(v => v.id === current) ? current : result.vehicles?.[0]?.id || null);
       setServices((result.services || []).map(s => ({ ...s, price: Number(s.base_price || 0), selected: false })));
       setOrders(result.orders || []);
+      setCompany(result.company || null);
     } catch (e) { setFatalError(e.message || "Ошибка запуска Mini App"); }
     finally { setBooting(false); }
   }
@@ -144,18 +148,79 @@ export default function App() {
     setSelectedMaterials({}); setComment(""); setCreatedOrder(null); setOrderError(""); go("configurator");
   }
 
+  function repeatOrder(order) {
+    const names = new Map((order.items || []).map(i => [i.service_name, i]));
+    setServices(current => current.map(service => ({ ...service, selected: names.has(service.name) })));
+    const mats = {};
+    for (const service of services) {
+      const item = names.get(service.name);
+      if (item?.material) mats[service.id] = item.material;
+    }
+    setSelectedMaterials(mats);
+    if (order.vehicle_id) setSelectedVehicleId(order.vehicle_id);
+    setComment(`Повтор заказа №${order.id}`);
+    go("configurator");
+  }
+
+  async function downloadDocument(order, type) {
+    setDocumentBusy(true); setOrderError("");
+    try {
+      const pdfMakeModule = await import("pdfmake/build/pdfmake");
+      const pdfFontsModule = await import("pdfmake/build/vfs_fonts");
+      const pdfMake = pdfMakeModule.default || pdfMakeModule;
+      const pdfFonts = pdfFontsModule.default || pdfFontsModule;
+      if (!pdfMake.vfs) pdfMake.vfs = pdfFonts?.pdfMake?.vfs || pdfFonts?.vfs || pdfFonts;
+      const isOffer = type === "offer";
+      const sumItems = (order.items || []).reduce((a, i) => a + Number(i.price || 0) * Number(i.quantity || 1), 0);
+      const totalValue = Number(order.final_price ?? order.preliminary_price ?? sumItems);
+      const rows = (order.items || []).map((i, idx) => [String(idx + 1), i.service_name, i.material || "—", String(i.quantity || 1), formatPrice(Number(i.price || 0) * Number(i.quantity || 1))]);
+      const docDefinition = {
+        pageSize: "A4", pageMargins: [38, 42, 38, 42],
+        defaultStyle: { fontSize: 10 },
+        content: [
+          { text: company?.company_name || "GarageFlow", fontSize: 20, bold: true },
+          { text: company?.legal_name || "", margin: [0, 2, 0, 16], color: "#667085" },
+          { text: isOffer ? "КОММЕРЧЕСКОЕ ПРЕДЛОЖЕНИЕ" : "ЗАКАЗ-НАРЯД", fontSize: 16, bold: true, margin: [0, 0, 0, 6] },
+          { text: `№${order.id} от ${formatDate(order.created_at)}`, margin: [0, 0, 0, 16] },
+          { text: `Клиент: ${[customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Клиент"}` },
+          { text: `Автомобиль: ${vehicleName(order.vehicle)}` },
+          order.vehicle?.license_plate ? { text: `Госномер: ${order.vehicle.license_plate}`, margin: [0, 0, 0, 14] } : { text: "", margin: [0, 0, 0, 14] },
+          { table: { headerRows: 1, widths: [22, "*", "*", 28, 70], body: [["№", "Работа", "Материал", "Кол.", "Сумма"], ...rows] }, layout: "lightHorizontalLines" },
+          { text: `Итого: ${formatPrice(totalValue)}`, alignment: "right", bold: true, fontSize: 14, margin: [0, 16, 0, 12] },
+          order.scheduled_at ? { text: `Запись: ${formatDate(order.scheduled_at, true)}` } : { text: "" },
+          company?.phone ? { text: `Телефон: ${company.phone}`, margin: [0, 18, 0, 0] } : { text: "" },
+          company?.email ? { text: `E-mail: ${company.email}` } : { text: "" },
+        ]
+      };
+      pdfMake.createPdf(docDefinition).download(`${isOffer ? "KP" : "Zakaz-naryad"}-${order.id}.pdf`);
+    } catch (e) { setOrderError(e.message || "Не удалось сформировать PDF"); }
+    finally { setDocumentBusy(false); }
+  }
+
   function BottomNav({ active }) {
-    return <nav className="bottomNav">
-      <button className={active === "configurator" ? "navItem activeNav" : "navItem"} onClick={() => go("configurator")}><SlidersHorizontal size={21}/><span>Конфигуратор</span></button>
-      <button className={active === "orders" ? "navItem activeNav" : "navItem"} onClick={() => go("orders")}><ClipboardList size={21}/><span>Заказы</span></button>
-      <button className={active === "vehicles" ? "navItem activeNav" : "navItem"} onClick={() => go("vehicles")}><Car size={21}/><span>Автомобили</span></button>
-      <button className={active === "profile" ? "navItem activeNav" : "navItem"} onClick={() => go("profile")}><UserRound size={21}/><span>Профиль</span></button>
+    return <nav className="bottomNav gfNav5">
+      <button className={active === "home" ? "navItem activeNav" : "navItem"} onClick={() => go("home")}><Home size={20}/><span>Главная</span></button>
+      <button className={active === "orders" ? "navItem activeNav" : "navItem"} onClick={() => go("orders")}><ClipboardList size={20}/><span>Заказы</span></button>
+      <button className={active === "configurator" ? "navItem activeNav" : "navItem"} onClick={() => go("configurator")}><Plus size={21}/><span>Новый</span></button>
+      <button className={active === "vehicles" ? "navItem activeNav" : "navItem"} onClick={() => go("vehicles")}><Car size={20}/><span>Авто</span></button>
+      <button className={active === "profile" ? "navItem activeNav" : "navItem"} onClick={() => go("profile")}><UserRound size={20}/><span>Профиль</span></button>
     </nav>;
   }
   const Header = ({ subtitle }) => <header className="header"><div><div className="logo">Garage<span>Flow</span></div><div className="subtitle">{subtitle}</div></div><button className="iconButton" onClick={refreshData}><RefreshCw size={21}/></button></header>;
 
   if (booting) return <div className="app"><main><div className="gfState"><LoaderCircle className="gfSpin" size={34}/><h2>Запускаем GarageFlow</h2><p>Проверяем Telegram и загружаем ваши данные…</p></div></main></div>;
   if (fatalError) return <div className="app"><main><div className="gfState gfError"><h2>Не удалось открыть приложение</h2><p>{fatalError}</p></div></main></div>;
+
+  if (screen === "home") {
+    const activeOrder = orders.find(o => !["done", "cancelled"].includes(o.status));
+    const st = activeOrder ? (statusInfo[activeOrder.status] || { label: activeOrder.status, step: 0 }) : null;
+    return <div className="app"><Header subtitle="Личный кабинет"/><main className="gfHome">
+      <section className="gfWelcome"><div><span>Здравствуйте</span><h1>{customer?.first_name || "Клиент"}</h1><p>Все по вашему автомобилю — в одном месте.</p></div><div className="gfVan">🚐</div></section>
+      {activeOrder ? <section className="gfActiveOrder" onClick={()=>{setSelectedOrder(activeOrder);go("order-details")}}><div className="gfCardTop"><div><span className="gfEyebrow">АКТИВНЫЙ ЗАКАЗ №{activeOrder.id}</span><h2>{vehicleName(activeOrder.vehicle)}</h2></div><ChevronRight/></div><div className="gfStatusLine"><span>{st.label}</span><strong>{formatPrice(activeOrder.final_price ?? activeOrder.preliminary_price)}</strong></div><div className="gfMiniProgress"><i style={{width:`${Math.max(10, ((st.step + 1) / 5) * 100)}%`}}/></div>{activeOrder.scheduled_at&&<p className="gfMeta"><CalendarDays size={16}/> {formatDate(activeOrder.scheduled_at,true)}</p>}</section> : <section className="gfEmptyHero"><h2>Активных заказов нет</h2><p>Выберите работы и отправьте новую заявку.</p><button className="continueButton gfWide" onClick={()=>go("configurator")}><Plus size={18}/>Создать заявку</button></section>}
+      <section className="gfQuickGrid"><button onClick={()=>go("configurator")}><SlidersHorizontal/><b>Новая заявка</b><span>Рассчитать работы</span></button><button onClick={()=>go("orders")}><ClipboardList/><b>Мои заказы</b><span>{orders.length} в истории</span></button><button onClick={()=>go("vehicles")}><Car/><b>Автомобили</b><span>{vehicles.length} сохранено</span></button><button onClick={()=>go("profile")}><UserRound/><b>Профиль</b><span>Контакты</span></button></section>
+      {company && <section className="gfContactCard"><div><span className="gfEyebrow">СВЯЗЬ С МЕНЕДЖЕРОМ</span><h3>{company.company_name || "GarageFlow"}</h3></div>{company.phone&&<a href={`tel:${company.phone}`}><Phone size={18}/>{company.phone}</a>}{company.email&&<a href={`mailto:${company.email}`}><Mail size={18}/>{company.email}</a>}</section>}
+    </main><BottomNav active="home"/></div>;
+  }
 
   if (screen === "profile") return <div className="app"><Header subtitle="Профиль клиента"/><main><section className="section"><div className="sectionHeader"><div><h2>{[customer?.first_name, customer?.last_name].filter(Boolean).join(" ") || "Профиль"}</h2><p>{customer?.username ? `@${customer.username}` : "Telegram-пользователь"}</p></div><UserRound size={24}/></div><div className="serviceCard gfForm"><label>Телефон<input value={profilePhone} onChange={e=>setProfilePhone(e.target.value)} placeholder="+7..."/></label><button className="continueButton" onClick={saveProfile} disabled={profileSaving}><Save size={18}/>{profileSaving ? "Сохраняем…" : "Сохранить"}</button>{orderError && <p className="gfErrorText">{orderError}</p>}</div></section></main><BottomNav active="profile"/></div>;
 
@@ -165,7 +230,21 @@ export default function App() {
 
   if (screen === "orders") return <div className="app"><Header subtitle="История заявок"/><main><section className="section"><div className="sectionHeader"><div><h2>Мои заказы</h2><p>Данные синхронизированы с CRM</p></div><ClipboardList size={22}/></div>{!orders.length&&<div className="serviceCard"><h3>Заказов пока нет</h3><p>Создайте первую заявку в конфигураторе.</p></div>}<div className="serviceList">{orders.map(order=>{const st=statusInfo[order.status]||{label:order.status,icon:"⚪"};return <div key={order.id} className="serviceCard" onClick={()=>{setSelectedOrder(order);go("order-details")}}><div className="serviceContent"><div><div className="vehicleLabel">ЗАКАЗ №{order.id}</div><h3>{vehicleName(order.vehicle)}</h3><strong>{formatPrice(order.final_price??order.preliminary_price)}</strong><p>{st.icon} {st.label}</p></div><ChevronRight size={23}/></div></div>})}</div></section></main><BottomNav active="orders"/></div>;
 
-  if (screen === "order-details" && selectedOrder) { const st=statusInfo[selectedOrder.status]||{label:selectedOrder.status,icon:"⚪",step:-1}; return <div className="app"><Header subtitle={`Заказ №${selectedOrder.id}`}/><main><button className="linkButton" onClick={()=>go("orders")}><ChevronLeft size={18}/>Все заказы</button><section className="vehicleCard"><div className="vehicleLabel">{st.icon} {st.label}</div><h1>{vehicleName(selectedOrder.vehicle)}</h1><p>{formatDate(selectedOrder.created_at)}</p></section>{selectedOrder.status!=="cancelled"&&<div className="gfProgress">{steps.map((s,i)=><div className={i<=st.step?"gfStep done":"gfStep"} key={s}><span>{i<st.step?"✓":i+1}</span><small>{s}</small></div>)}</div>}<section className="section"><div className="sectionHeader"><div><h2>Работы</h2><p>Состав заявки</p></div><ClipboardList size={22}/></div><div className="serviceList">{selectedOrder.items?.map(item=><div className="serviceCard" key={item.id}><div className="serviceContent"><div><h3>{item.service_name}</h3>{item.material&&<p>Материал: {item.material}</p>}</div><strong>{formatPrice(item.price)}</strong></div></div>)}</div></section>{selectedOrder.scheduled_at&&<section className="section"><div className="serviceCard"><h3>Запись</h3><p>{formatDate(selectedOrder.scheduled_at,true)}</p></div></section>}<section className="section"><div className="vehicleCard"><span>Стоимость</span><strong className="gfBigPrice">{formatPrice(selectedOrder.final_price??selectedOrder.preliminary_price)}</strong></div></section></main><BottomNav active="orders"/></div>; }
+  if (screen === "order-details" && selectedOrder) {
+    const st=statusInfo[selectedOrder.status]||{label:selectedOrder.status,icon:"⚪",step:-1};
+    const tasks=[...(selectedOrder.production_tasks||[])].sort((a,b)=>(a.sort_order||0)-(b.sort_order||0));
+    const doneTasks=tasks.filter(t=>t.is_done).length;
+    return <div className="app"><Header subtitle={`Заказ №${selectedOrder.id}`}/><main><button className="linkButton" onClick={()=>go("orders")}><ChevronLeft size={18}/>Все заказы</button>
+      <section className="vehicleCard gfOrderHero"><div className="vehicleLabel">{st.icon} {st.label}</div><h1>{vehicleName(selectedOrder.vehicle)}</h1><p>{formatDate(selectedOrder.created_at)}</p><strong className="gfBigPrice">{formatPrice(selectedOrder.final_price??selectedOrder.preliminary_price)}</strong></section>
+      {selectedOrder.status!=="cancelled"&&<div className="gfProgress">{steps.map((x,i)=><div className={i<=st.step?"gfStep done":"gfStep"} key={x}><span>{i<st.step?"✓":i+1}</span><small>{x}</small></div>)}</div>}
+      {selectedOrder.scheduled_at&&<section className="section"><div className="serviceCard gfInfoRow"><CalendarDays/><div><small>Дата работ</small><h3>{formatDate(selectedOrder.scheduled_at,true)}</h3></div></div></section>}
+      {tasks.length>0&&<section className="section"><div className="sectionHeader"><div><h2>Ход работ</h2><p>{doneTasks} из {tasks.length} этапов выполнено</p></div><Wrench size={22}/></div><div className="gfTaskList">{tasks.map(t=><div className={t.is_done?"gfClientTask done":"gfClientTask"} key={t.id}><span>{t.is_done?<Check size={16}/>:<Clock3 size={16}/>}</span><div><b>{t.title}</b><small>{t.is_done?"Выполнено":"В работе"}</small></div></div>)}</div></section>}
+      <section className="section"><div className="sectionHeader"><div><h2>Работы</h2><p>Состав заказа</p></div><ClipboardList size={22}/></div><div className="serviceList">{selectedOrder.items?.map(item=><div className="serviceCard" key={item.id}><div className="serviceContent"><div><h3>{item.service_name}</h3>{item.material&&<p>Материал: {item.material}</p>}</div><strong>{formatPrice(Number(item.price||0)*Number(item.quantity||1))}</strong></div></div>)}</div></section>
+      <section className="section"><div className="sectionHeader"><div><h2>Документы</h2><p>PDF по вашему заказу</p></div><FileText size={22}/></div><div className="gfDocGrid"><button disabled={documentBusy} onClick={()=>downloadDocument(selectedOrder,"offer")}><Download size={18}/><span><b>Коммерческое предложение</b><small>Скачать PDF</small></span></button><button disabled={documentBusy} onClick={()=>downloadDocument(selectedOrder,"work_order")}><Download size={18}/><span><b>Заказ-наряд</b><small>Скачать PDF</small></span></button></div>{orderError&&<p className="gfErrorText">{orderError}</p>}</section>
+      <section className="section"><button className="continueButton gfWide" onClick={()=>repeatOrder(selectedOrder)}><Repeat2 size={18}/>Повторить заказ</button></section>
+      {company&&(company.phone||company.email)&&<section className="section"><div className="gfContactCard"><span className="gfEyebrow">НУЖНА ПОМОЩЬ?</span><h3>Связаться с менеджером</h3>{company.phone&&<a href={`tel:${company.phone}`}><Phone size={18}/>{company.phone}</a>}{company.email&&<a href={`mailto:${company.email}`}><Mail size={18}/>{company.email}</a>}</div></section>}
+    </main><BottomNav active="orders"/></div>;
+  }
 
   if (screen === "success" && createdOrder) return <div className="app"><Header subtitle="Заявка отправлена"/><main><section className="vehicleCard gfSuccess"><CircleCheckBig size={70}/><div className="vehicleLabel">ЗАЯВКА СОЗДАНА</div><h1>Заказ №{createdOrder.id}</h1><p>Менеджер уже может работать с заявкой в GarageFlow CRM.</p><strong className="gfBigPrice">{formatPrice(createdOrder.total)}</strong><button className="continueButton gfWide" onClick={()=>go("orders")}>Мои заказы<ChevronRight size={20}/></button><button className="linkButton gfWide" onClick={resetOrder}>Новый заказ</button></section></main><BottomNav active="orders"/></div>;
 
