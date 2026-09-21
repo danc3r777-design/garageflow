@@ -1315,3 +1315,19 @@
   .crmTodayButton { width: 100%; }
 }
 \n\n/* ===== GarageFlow v15: product operations ===== */\n.crmMyTasksPanel { margin-top: 18px; }\n.crmV15TaskList { display: grid; gap: 8px; }\n.crmV15Task { width:100%; border:1px solid #e7ebf1; background:#fff; border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:11px; text-align:left; color:inherit; cursor:pointer; }\n.crmV15Task:hover { background:#f8fafc; }\n.crmV15TaskOverdue { border-color:#f0c6c6; background:#fff8f8; }\n.crmV15TaskCheck { width:24px; height:24px; flex:0 0 24px; border-radius:50%; display:grid; place-items:center; background:#eef3f8; font-weight:800; }\n.crmV15Task > div { flex:1; min-width:0; }\n.crmV15Task strong,.crmV15Task small { display:block; }\n.crmV15Task strong { font-size:13px; }\n.crmV15Task small { margin-top:3px; color:#8792a3; font-size:11px; }\n.crmLaunchPanel { margin-bottom:18px; }\n.crmLaunchScore { min-width:54px; height:36px; padding:0 12px; border-radius:18px; display:grid; place-items:center; background:#eef4ff; color:#1769d8; font-size:14px; }\n.crmLaunchChecklist { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin:14px 0; }\n.crmLaunchItem { display:flex; align-items:center; gap:8px; border:1px solid #e6eaf0; border-radius:11px; padding:11px 12px; color:#7b8594; }\n.crmLaunchItem span { font-size:17px; font-weight:800; }\n.crmLaunchItem strong { font-size:12px; }\n.crmLaunchItemDone { background:#f3faf5; border-color:#cfe8d5; color:#2d7a43; }\n@media (max-width:700px) {\n  .crmLaunchChecklist { grid-template-columns:1fr; }\n  .crmV15Task { padding:11px; }\n  .crmMyTasksPanel { margin-top:14px; }\n}\n
+/* ===== GarageFlow v15.1: mobile employee profile + logout ===== */
+.crmTopbarActions{display:flex;align-items:center;gap:8px}
+.crmMobileProfileButton{display:none}
+.crmMobileProfilePage{max-width:560px;margin:0 auto}
+.crmProfileCard{display:flex;align-items:center;gap:14px;padding:18px}
+.crmProfileAvatar{width:54px;height:54px;flex:0 0 54px;border-radius:50%;display:grid;place-items:center;background:#eef4ff;color:#1769d8}
+.crmProfileIdentity{min-width:0}.crmProfileIdentity h2{margin:0;font-size:18px}.crmProfileIdentity p{margin:4px 0 0;color:#66748a;font-weight:700}.crmProfileIdentity span{display:block;margin-top:4px;color:#8a95a5;font-size:12px;overflow-wrap:anywhere}
+.crmMobileLogoutButton{width:100%;margin-top:12px;border:1px solid #efcaca;background:#fff5f5;color:#b83232;border-radius:12px;padding:13px 15px;display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:800;cursor:pointer}
+.crmMobileLogoutHint{text-align:center;color:#8793a5;font-size:11px;line-height:1.5;margin:10px 12px 0}
+@media(max-width:700px){
+  .crmTopbarActions{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .crmMobileProfileButton{display:flex;min-width:0;align-items:center;justify-content:flex-start;gap:7px;border:1px solid #dfe5ed;background:#fff;color:#40506a;border-radius:10px;padding:10px 12px;font:inherit;font-weight:700;cursor:pointer}
+  .crmMobileProfileButton span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crmTopbarActions .crmRefresh{width:auto!important;min-width:44px;padding:10px 12px}
+  .crmProfileCard{margin-top:4px}
+}
