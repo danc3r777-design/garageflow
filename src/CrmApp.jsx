@@ -130,9 +130,9 @@ export default function CrmApp() {
   useEffect(() => {
     if (!employee?.role) return;
     const allowedPages = {
-      admin: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","settings"]),
-      manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse"]),
-      master: new Set(["overview","orders","calendar","warehouse"]),
+      admin: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","settings","profile"]),
+      manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","profile"]),
+      master: new Set(["overview","orders","calendar","warehouse","profile"]),
     };
     const allowed = allowedPages[employee.role] || allowedPages.master;
     if (!allowed.has(activePage)) {
@@ -870,8 +870,8 @@ export default function CrmApp() {
   ];
   const rolePages = {
     admin: new Set(allMenu.map(([key])=>key)),
-    manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse"]),
-    master: new Set(["overview","orders","calendar","warehouse"]),
+    manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","profile"]),
+    master: new Set(["overview","orders","calendar","warehouse","profile"]),
   };
   const menu = allMenu.filter(([key]) => (rolePages[employee?.role] || rolePages.master).has(key));
 
