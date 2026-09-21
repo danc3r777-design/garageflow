@@ -286,6 +286,28 @@ export default function CrmApp() {
     finally { setSavingOrder(false); }
   }
 
+  async function proposeBookingTime() {
+    if (!selectedOrder || savingOrder) return;
+    if (!editingOrder.scheduled_at) { setError("Выберите дату и время записи."); return; }
+    setSavingOrder(true); setSaveMessage(""); setError("");
+    try {
+      const date = new Date(editingOrder.scheduled_at);
+      if (Number.isNaN(date.getTime())) throw new Error("Проверьте дату и время записи.");
+      const scheduledAt = date.toISOString();
+      if (scheduledAt === selectedOrder.scheduled_at && selectedOrder.booking_status === "scheduled") {
+        setSaveMessage("Это время уже предложено клиенту.");
+        return;
+      }
+      const data = await invokeCrmFunction("crm-admin", { action:"schedule_booking", order_id:selectedOrder.id, scheduled_at:scheduledAt, accept_requested:false });
+      const updated = { ...selectedOrder, ...(data.order || {}) };
+      setSelectedOrder(updated);
+      setOrders((current)=>current.map((o)=>o.id===updated.id?{...o,...(data.order||{})}:o));
+      setEditingOrder((current)=>({...current,scheduled_at:getDateTimeLocalValue(updated.scheduled_at)}));
+      setSaveMessage("Новое время предложено клиенту. Ожидаем подтверждения.");
+    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось предложить время."); }
+    finally { setSavingOrder(false); }
+  }
+
   async function cancelBooking() {
     if (!selectedOrder || savingOrder) return;
     if (!window.confirm("Отменить только запись на визит? Сам заказ останется в CRM.")) return;
@@ -628,7 +650,7 @@ export default function CrmApp() {
       });
       setSaveMessage("Изменения сохранены");
       if (String(oldFinalPrice ?? "") !== String(updated.final_price ?? "")) await notifyOrder(updated.id, "price_changed");
-      if (String(oldScheduledAt ?? "") !== String(updated.scheduled_at ?? "")) await notifyOrder(updated.id, "schedule_changed");
+      // schedule_booking already sends the appointment proposal; do not send a second schedule_changed Telegram notification here.
     } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось сохранить заказ."); }
     finally { setSavingOrder(false); }
   }
@@ -1074,7 +1096,7 @@ export default function CrmApp() {
         <div className="crmModalSection"><span className="crmModalLabel">Работы</span><div className="crmModalItems">{selectedOrder.items?.map((item)=><div key={item.id} className="crmModalItem"><div><strong>{item.service_name}</strong>{item.material&&<span>{item.material}</span>}</div>{employee?.role !== "master" && <strong>{formatPrice(item.price)}</strong>}</div>)}</div></div>
         {selectedOrder.customer_comment&&<div className="crmModalSection"><span className="crmModalLabel">Комментарий клиента</span><p>{selectedOrder.customer_comment}</p></div>}
         {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Приоритет заказа</span><div className="crmPriorityChoices">{[["normal","Обычный"],["high","Высокий"],["urgent","Срочный"]].map(([key,label])=><button type="button" key={key} className={`crmPriorityChoice crmPriorityChoice-${key} ${editingOrder.priority===key?"crmPriorityChoiceActive":""}`} onClick={()=>setEditingOrder((c)=>({...c,priority:key}))}>{label}</button>)}</div></div>}
-        {employee?.role !== "master" && <div className="crmModalSection crmV181Booking"><span className="crmModalLabel">Запись клиента</span>{selectedOrder.requested_at ? <div className={`crmV181Request ${selectedOrder.booking_status==="reschedule_requested"?"crmV181RequestMove":""}`}><div><small>{selectedOrder.booking_status==="reschedule_requested"?"Клиент просит перенести на":"Желаемое время клиента"}</small><strong>{formatDate(selectedOrder.requested_at)}</strong><span>{selectedOrder.booking_status==="reschedule_requested"?"Запрос на перенос":"Запрос клиента"}</span></div><button type="button" disabled={savingOrder} onClick={confirmRequestedBooking}>{savingOrder?"Сохраняем...":"Принять это время"}</button></div> : <div className="crmV181NoRequest">Клиент не указывал желаемое время.</div>}<div className="crmV181Scheduled"><label><span>Подтверждённая запись</span><input className="crmEditInput" type="datetime-local" value={editingOrder.scheduled_at} onChange={(e)=>setEditingOrder((c)=>({...c,scheduled_at:e.target.value}))}/></label><div className={`crmV181BookingState crmV181BookingState-${selectedOrder.booking_status||"none"}`}>{selectedOrder.booking_status==="confirmed"?"✓ Запись подтверждена":selectedOrder.booking_status==="scheduled"?"Ожидаем подтверждения клиента":selectedOrder.booking_status==="reschedule_requested"?"Клиент запросил перенос":selectedOrder.booking_status==="requested"?"Нужно назначить время":selectedOrder.booking_status==="cancelled"?"Запись отменена":"Запись не подтверждена"}</div></div><small className="crmDocumentsHint">Если принять время клиента — запись подтверждается сразу. Если назначить другое время — клиенту потребуется его подтвердить.</small>{selectedOrder.scheduled_at&&<div className="crmV182BookingActions"><button type="button" className="crmV182CancelBooking" onClick={cancelBooking} disabled={savingOrder}>Отменить только запись</button></div>}</div>}
+        {employee?.role !== "master" && <div className="crmModalSection crmV181Booking"><span className="crmModalLabel">Запись клиента</span>{selectedOrder.requested_at ? <div className={`crmV181Request ${selectedOrder.booking_status==="reschedule_requested"?"crmV181RequestMove":""}`}><div><small>{selectedOrder.booking_status==="reschedule_requested"?"Клиент просит перенести на":"Желаемое время клиента"}</small><strong>{formatDate(selectedOrder.requested_at)}</strong><span>{selectedOrder.booking_status==="reschedule_requested"?"Запрос на перенос":"Запрос клиента"}</span></div><button type="button" disabled={savingOrder} onClick={confirmRequestedBooking}>{savingOrder?"Сохраняем...":"Принять это время"}</button></div> : <div className="crmV181NoRequest">Клиент не указывал желаемое время.</div>}<div className="crmV181Scheduled"><label><span>Подтверждённая запись</span><input className="crmEditInput" type="datetime-local" value={editingOrder.scheduled_at} onChange={(e)=>setEditingOrder((c)=>({...c,scheduled_at:e.target.value}))}/></label><button type="button" className="crmV183ProposeBooking" disabled={savingOrder||!editingOrder.scheduled_at} onClick={proposeBookingTime}>{savingOrder?"Сохраняем...":"Предложить это время"}</button><div className={`crmV181BookingState crmV181BookingState-${selectedOrder.booking_status||"none"}`}>{selectedOrder.booking_status==="confirmed"?"✓ Запись подтверждена":selectedOrder.booking_status==="scheduled"?"Ожидаем подтверждения клиента":selectedOrder.booking_status==="reschedule_requested"?"Клиент запросил перенос":selectedOrder.booking_status==="requested"?"Нужно назначить время":selectedOrder.booking_status==="cancelled"?"Запись отменена":"Запись не подтверждена"}</div></div><small className="crmDocumentsHint">Если принять время клиента — запись подтверждается сразу. Если назначить другое время — клиенту потребуется его подтвердить.</small>{selectedOrder.scheduled_at&&<div className="crmV182BookingActions"><button type="button" className="crmV182CancelBooking" onClick={cancelBooking} disabled={savingOrder}>Отменить только запись</button></div>}</div>}
         {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Итоговая стоимость</span><div className="crmPriceInputWrap"><input className="crmEditInput" type="number" min="0" step="1" value={editingOrder.final_price} onChange={(e)=>setEditingOrder((c)=>({...c,final_price:e.target.value}))} placeholder="Например, 52000"/><span>₽</span></div></div>}
         {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Комментарий менеджера</span><textarea className="crmEditTextarea" value={editingOrder.manager_comment} onChange={(e)=>setEditingOrder((c)=>({...c,manager_comment:e.target.value}))} placeholder="Например: клиент согласовал дополнительную защиту арок" rows={4}/></div>}
         <div className="crmModalSection crmProductionSection">
