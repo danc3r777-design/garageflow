@@ -34,6 +34,7 @@ const pageMeta = {
   analytics: ["Аналитика", "Показатели GarageFlow по реальным заказам"],
   warehouse: ["Склад", "Материалы, остатки и минимальные запасы"],
   settings: ["Настройки", "Услуги, цены и сотрудники CRM"],
+  profile: ["Профиль", "Текущий сотрудник и выход из CRM"],
 };
 
 function formatPrice(value) {
@@ -895,10 +896,22 @@ export default function CrmApp() {
 
       <main className="crmMain">
         <header className="crmTopbar"><div><h1>{pageTitle}</h1><p>{pageSubtitle}</p></div>
-          <button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
+          <div className="crmTopbarActions">
+            <button type="button" className="crmMobileProfileButton" onClick={()=>setActivePage("profile")}><UserRound size={18}/><span>{employee?.display_name || "Профиль"}</span></button>
+            <button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
+          </div>
         </header>
         {error && <div className="crmError crmPageError">{error}</div>}
         {loading ? <div className="crmLoading">Загружаем данные...</div> : <>
+
+          {activePage === "profile" && <section className="crmMobileProfilePage">
+            <div className="crmPanel crmProfileCard">
+              <div className="crmProfileAvatar"><UserRound size={30}/></div>
+              <div className="crmProfileIdentity"><h2>{employee?.display_name || "Сотрудник"}</h2><p>{roleLabels[employee?.role] || employee?.role || "Сотрудник"}</p>{session?.user?.email && <span>{session.user.email}</span>}</div>
+            </div>
+            <button className="crmMobileLogoutButton" type="button" onClick={logout}><LogOut size={19}/>Выйти из аккаунта</button>
+            <p className="crmMobileLogoutHint">После выхода откроется экран входа, где можно войти под другим сотрудником.</p>
+          </section>}
 
           {activePage === "overview" && <>
             <section className="crmStats crmStatsFive">
