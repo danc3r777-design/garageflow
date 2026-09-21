@@ -1175,3 +1175,142 @@
   .crmDocumentButton { width: 100% !important; justify-content: flex-start !important; min-height: 48px !important; }
   .crmModalActions { position: relative; z-index: 2; }
 }
+
+/* ===== GarageFlow v14.4: mobile calendar + warehouse + settings ===== */
+@media (max-width: 760px) {
+  /* Calendar */
+  .crmCalendarV14 { margin-top: 14px !important; }
+  .crmCalendarV14 .crmCalendarSummary {
+    grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+  .crmCalendarV14 .crmCalendarSummary > div {
+    min-width: 0;
+    padding: 12px !important;
+    border-radius: 12px !important;
+  }
+  .crmCalendarV14 .crmCalendarSummary span { font-size: 11px !important; }
+  .crmCalendarV14 .crmCalendarSummary strong { font-size: 20px !important; }
+  .crmCalendarControlBar {
+    grid-template-columns: minmax(0,1fr) auto !important;
+    margin-bottom: 12px !important;
+  }
+  .crmCalendarViewSwitch { min-width: 0; }
+  .crmCalendarViewSwitch button,
+  .crmTodayButton { min-height: 40px; }
+  .crmMonthToolbar { margin: 8px 0 12px !important; }
+  .crmMonthToolbar h2 { font-size: 18px !important; }
+  .crmCalendarV14 .crmWeekdays,
+  .crmCalendarV14 .crmMonthGrid {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .crmCalendarV14 .crmMonthDay {
+    min-height: 62px !important;
+    padding: 6px 4px !important;
+  }
+  .crmCalendarV14 .crmMonthEvent { display: none !important; }
+  .crmCalendarV14 .crmMonthDay small { display: none !important; }
+  .crmCalendarV14 .crmMonthNumber {
+    height: 100%;
+    align-items: flex-start !important;
+    font-size: 12px !important;
+  }
+  .crmCalendarV14 .crmMonthDayBusy { background: #f3f8ff !important; }
+  .crmCalendarV14 .crmMonthDaySelected {
+    outline: 2px solid #1672f3 !important;
+    outline-offset: -1px;
+  }
+  .crmDayAgenda {
+    margin-top: 14px !important;
+    padding: 14px !important;
+    border-radius: 15px !important;
+    background: #fff;
+    border: 1px solid #e3e9f1;
+  }
+  .crmDayAgenda .crmPanelHeader { margin-bottom: 8px !important; }
+  .crmDayAgenda .crmPanelHeader h2 { font-size: 16px !important; }
+  .crmDayAgenda .crmListRow { padding: 12px 4px !important; gap: 10px !important; }
+  .crmDayAgenda .crmCalendarTime { min-width: 46px !important; width: 46px !important; }
+
+  /* Warehouse */
+  .crmDataSection .crmV4Grid { margin-top: 12px !important; gap: 12px !important; }
+  .crmDataSection .crmPanel {
+    padding: 14px !important;
+    border-radius: 15px !important;
+    box-shadow: none !important;
+    border: 1px solid #e4e9f0;
+  }
+  .crmInventoryList { gap: 9px !important; }
+  .crmInventoryRow {
+    grid-template-columns: minmax(0,1fr) auto !important;
+    gap: 8px 12px !important;
+    padding: 13px !important;
+    border-radius: 12px !important;
+  }
+  .crmInventoryRow > div:first-child { grid-column: 1 / -1; }
+  .crmInventoryRow > div:not(:first-child) {
+    background: #f6f8fb;
+    border-radius: 9px;
+    padding: 8px 10px;
+  }
+  .crmInventoryLow > div:not(:first-child) { background: #fff0f0; }
+  .crmV4Form label { margin-top: 10px !important; }
+  .crmV4Form input {
+    min-height: 46px;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+  .crmV4Form .crmCreateButton { min-height: 46px; margin-top: 12px; }
+
+  /* Settings */
+  .crmServiceEditorList { gap: 10px !important; }
+  .crmServiceEditor { padding: 12px !important; border-radius: 12px !important; }
+  .crmServiceEditorFields { gap: 9px !important; }
+  .crmServiceEditorFields input,
+  .crmNewServiceForm input,
+  .crmCompanySettings input,
+  .crmCompanySettings textarea,
+  .crmEmployeeRole {
+    min-height: 46px;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+  .crmServiceEditorActions { margin-top: 10px !important; }
+  .crmServiceToggle { min-height: 42px; }
+  .crmNotifySettings { gap: 8px !important; margin: 12px 0 !important; }
+  .crmNotifySettings label { padding: 12px !important; border-radius: 12px !important; }
+  .crmNotifySettings strong { font-size: 13px !important; }
+  .crmNotifySettings small { font-size: 11px !important; }
+  .crmCompanySettings { gap: 9px !important; }
+  .crmCompanySettings > label { font-size: 12px !important; }
+  .crmCompanySettings textarea { min-height: 88px; }
+  .crmSettingsList { gap: 9px !important; }
+  .crmEmployeeAdminRow {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    padding: 12px !important;
+    gap: 9px !important;
+  }
+  .crmEmployeeRole,
+  .crmEmployeeTelegram,
+  .crmEmployeeActive { width: 100% !important; box-sizing: border-box; }
+  .crmEmployeeActive {
+    min-height: 42px;
+    padding: 0 10px;
+    border: 1px solid #e4e9f0;
+    border-radius: 11px;
+  }
+  .crmEmployeeTelegram { min-height: 44px; }
+  .crmHint { font-size: 11px !important; }
+
+  /* Keep content above the fixed mobile navigation */
+  .crmMain { padding-bottom: calc(150px + env(safe-area-inset-bottom)) !important; }
+}
+
+@media (max-width: 380px) {
+  .crmCalendarV14 .crmMonthDay { min-height: 56px !important; }
+  .crmCalendarControlBar { grid-template-columns: 1fr !important; }
+  .crmTodayButton { width: 100%; }
+}
