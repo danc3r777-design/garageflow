@@ -1379,3 +1379,9 @@
 
 /* GarageFlow v18.2 booking states */
 .crmV182BookingActions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}.crmV182CancelBooking{border:1px solid #ef4444;background:#fff;color:#b91c1c;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}.crmBooking-confirmed{box-shadow:inset 3px 0 0 #22c55e}.crmBooking-scheduled{box-shadow:inset 3px 0 0 #f59e0b}.crmBooking-reschedule_requested{box-shadow:inset 3px 0 0 #ef4444}.crmBooking-cancelled{opacity:.55;text-decoration:line-through}@media(max-width:760px){.crmV182BookingActions,.crmV182BookingActions button{width:100%}}
+
+
+/* GarageFlow v18.3 — booking quick action */
+.crmV183ProposeBooking{min-height:46px;padding:0 18px;border:0;border-radius:14px;background:#1677ff;color:#fff;font:inherit;font-weight:800;cursor:pointer;white-space:nowrap}
+.crmV183ProposeBooking:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:760px){.crmV181Scheduled{grid-template-columns:1fr!important}.crmV183ProposeBooking{width:100%;min-height:52px}}
