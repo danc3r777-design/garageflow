@@ -118,6 +118,8 @@ export default function CrmApp() {
   const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
   const [productionLoading, setProductionLoading] = useState(false);
   const [newTaskTitle, setNewTaskTitle] = useState("");
+  const [productionTaskDraft, setProductionTaskDraft] = useState({ assigned_employee_id:"", due_at:"" });
+  const [uploadingProductionPhoto, setUploadingProductionPhoto] = useState(false);
   const [materialDraft, setMaterialDraft] = useState({ inventory_item_id: "", quantity: "" });
   const [laborCostDraft, setLaborCostDraft] = useState("0");
   const [savingEconomics, setSavingEconomics] = useState(false);
@@ -321,13 +323,14 @@ export default function CrmApp() {
       setProductionData({
         tasks: data.tasks || [],
         materials: data.materials || [],
+        photos: data.photos || [],
         assigned_employee_id: data.assigned_employee_id || null,
         labor_cost: Number(data.labor_cost || 0),
       });
       setLaborCostDraft(String(Number(data.labor_cost || 0)));
     } catch (err) {
       console.error("production_snapshot", err);
-      setProductionData({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
+      setProductionData({ tasks: [], materials: [], photos: [], assigned_employee_id: null, labor_cost: 0 });
       setLaborCostDraft("0");
     } finally {
       setProductionLoading(false);
@@ -347,18 +350,33 @@ export default function CrmApp() {
     event.preventDefault();
     if (!selectedOrder || !newTaskTitle.trim()) return;
     try {
-      await invokeCrmFunction("crm-admin", { action:"add_production_task", order_id:selectedOrder.id, title:newTaskTitle.trim() });
+      await invokeCrmFunction("crm-admin", { action:"add_production_task", order_id:selectedOrder.id, title:newTaskTitle.trim(), assigned_employee_id:productionTaskDraft.assigned_employee_id?Number(productionTaskDraft.assigned_employee_id):null, due_at:productionTaskDraft.due_at?new Date(productionTaskDraft.due_at).toISOString():null });
       setNewTaskTitle("");
+      setProductionTaskDraft({assigned_employee_id:"",due_at:""});
       await loadProduction(selectedOrder.id);
     } catch(err) { setError(err instanceof Error?err.message:"Не удалось добавить этап"); }
   }
 
-  async function toggleProductionTask(task) {
+  async function setProductionTaskStatus(task, status) {
     if (!selectedOrder) return;
     try {
-      await invokeCrmFunction("crm-admin", { action:"toggle_production_task", task_id:task.id, is_done:!task.is_done });
+      await invokeCrmFunction("crm-admin", { action:"update_production_task", task_id:task.id, status });
       await loadProduction(selectedOrder.id);
     } catch(err) { setError(err instanceof Error?err.message:"Не удалось изменить этап"); }
+  }
+
+  async function uploadProductionPhoto(event, kind) {
+    const file=event.target.files?.[0];
+    event.target.value="";
+    if(!file||!selectedOrder) return;
+    if(file.size>7*1024*1024){setError("Фото должно быть не больше 7 МБ");return;}
+    setUploadingProductionPhoto(true); setError("");
+    try {
+      const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
+      await invokeCrmFunction("crm-admin", {action:"upload_production_photo",order_id:selectedOrder.id,kind,file_name:file.name,mime_type:file.type||"image/jpeg",data_url:dataUrl});
+      await loadProduction(selectedOrder.id);
+    } catch(err){setError(err instanceof Error?err.message:"Не удалось загрузить фото");}
+    finally{setUploadingProductionPhoto(false);}
   }
 
   async function addOrderMaterial(event) {
@@ -1039,11 +1057,13 @@ export default function CrmApp() {
                 {adminData.employees.filter((x)=>x.is_active).map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name || `Сотрудник #${emp.id}`}</option>)}
               </select>
             </label> : <div className="crmMasterNotice">Рабочий режим мастера: этапы производства, материалы и задачи.</div>}
-            <div className="crmProductionTasks">
-              {productionData.tasks.map((task)=> employee?.role === "manager" ? <div key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></div> : <button type="button" key={task.id} className={`crmProductionTask ${task.is_done?"crmProductionTaskDone":""}`} onClick={()=>toggleProductionTask(task)}><span>{task.is_done?"✓":"○"}</span><strong>{task.title}</strong></button>)}
+            <div className="crmV16Progress"><div><strong>Прогресс производства</strong><span>{productionData.tasks.length ? Math.round(productionData.tasks.filter((t)=>(t.status|| (t.is_done?"done":"todo"))==="done").length/productionData.tasks.length*100) : 0}%</span></div><div className="crmV16ProgressTrack"><i style={{width:`${productionData.tasks.length ? Math.round(productionData.tasks.filter((t)=>(t.status||(t.is_done?"done":"todo"))==="done").length/productionData.tasks.length*100) : 0}%`}}/></div></div>
+            <div className="crmProductionTasks crmV16Stages">
+              {productionData.tasks.map((task)=>{const taskStatus=task.status||(task.is_done?"done":"todo");return <div key={task.id} className={`crmV16Stage crmV16Stage-${taskStatus}`}><div className="crmV16StageHead"><div><strong>{task.title}</strong><small>{task.assignee?.display_name||"Без исполнителя"}{task.due_at?` · до ${formatDate(task.due_at)}`:""}</small></div><span>{taskStatus==="done"?"Готово":taskStatus==="in_progress"?"В работе":"Не начат"}</span></div>{task.notes&&<p>{task.notes}</p>}{employee?.role !== "manager"&&<div className="crmV16StageActions"><button type="button" className={taskStatus==="todo"?"active":""} onClick={()=>setProductionTaskStatus(task,"todo")}>Не начат</button><button type="button" className={taskStatus==="in_progress"?"active":""} onClick={()=>setProductionTaskStatus(task,"in_progress")}>В работу</button><button type="button" className={taskStatus==="done"?"active":""} onClick={()=>setProductionTaskStatus(task,"done")}>Готово</button></div>}</div>})}
               {!productionData.tasks.length && <div className="crmEmptyState">Этапов производства пока нет</div>}
             </div>
-            {employee?.role !== "manager" && <form className="crmProductionAdd" onSubmit={addProductionTask}><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/><button type="submit">Добавить этап</button></form>}
+            {employee?.role !== "manager" && <form className="crmProductionAdd crmV16AddStage" onSubmit={addProductionTask}><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/><select value={productionTaskDraft.assigned_employee_id} onChange={(e)=>setProductionTaskDraft((c)=>({...c,assigned_employee_id:e.target.value}))}><option value="">Исполнитель заказа</option>{adminData.employees.filter((x)=>x.is_active&&x.role==="master").map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name}</option>)}</select><input type="datetime-local" value={productionTaskDraft.due_at} onChange={(e)=>setProductionTaskDraft((c)=>({...c,due_at:e.target.value}))}/><button type="submit">Добавить этап</button></form>}
+            <div className="crmV16Photos"><div className="crmV16PhotoHeader"><div><strong>Фото работ</strong><small>До / процесс / после</small></div>{employee?.role!=="manager"&&<div className="crmV16PhotoButtons"><label>+ До<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"before")}/></label><label>+ Процесс<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"process")}/></label><label>+ После<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"after")}/></label></div>}</div>{uploadingProductionPhoto&&<div className="crmEmptyState">Загружаем фото...</div>}<div className="crmV16PhotoGrid">{(productionData.photos||[]).map((photo)=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.kind}/><span>{photo.kind==="before"?"До":photo.kind==="after"?"После":"Процесс"}</span></a>)}</div>{!(productionData.photos||[]).length&&!uploadingProductionPhoto&&<div className="crmEmptyState">Фото работ пока нет</div>}</div>
             {employee?.role === "manager" && <div className="crmMasterNotice">Производство доступно менеджеру только для просмотра. Исполнение ведёт назначенный мастер.</div>}
           </>}
         </div>
