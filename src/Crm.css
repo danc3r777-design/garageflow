@@ -1385,3 +1385,8 @@
 .crmV183ProposeBooking{min-height:46px;padding:0 18px;border:0;border-radius:14px;background:#1677ff;color:#fff;font:inherit;font-weight:800;cursor:pointer;white-space:nowrap}
 .crmV183ProposeBooking:disabled{opacity:.55;cursor:not-allowed}
 @media(max-width:760px){.crmV181Scheduled{grid-template-columns:1fr!important}.crmV183ProposeBooking{width:100%;min-height:52px}}
+
+
+/* GarageFlow v18.6 — live CRM + reschedule attention */
+.crmLiveState{font-size:12px;font-weight:800;color:#7b8798;white-space:nowrap}.crmLiveState-live{color:#159447}.crmLiveState-fallback{color:#b36a00}.crmMoveBadge{display:inline-flex;margin-left:7px;padding:3px 7px;border-radius:999px;background:#fff0d9;color:#a35f00;font-size:9px;font-weight:900;vertical-align:middle}.crmOrderCard:has(.crmMoveBadge){border-color:#f1bd69;box-shadow:0 0 0 2px rgba(245,158,11,.08)}
+@media(max-width:760px){.crmLiveState{font-size:10px}.crmMoveBadge{display:inline-flex;margin-top:4px;margin-left:5px}}
