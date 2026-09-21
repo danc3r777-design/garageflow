@@ -128,6 +128,7 @@ export default function CrmApp() {
   const [taskDraft, setTaskDraft] = useState({ title:"", due_at:"", assigned_employee_id:"" });
   const [viewFilter, setViewFilter] = useState("all");
   const [savingEmployeeId, setSavingEmployeeId] = useState(null);
+  const [liveSync, setLiveSync] = useState("connecting");
 
   useEffect(() => {
     if (!employee?.role) return;
@@ -157,6 +158,21 @@ export default function CrmApp() {
     const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
     return () => { mounted = false; subscription.subscription.unsubscribe(); };
   }, []);
+
+  useEffect(() => {
+    if (!session?.user?.id) return;
+    let refreshTimer = null;
+    const refreshSoon = () => {
+      clearTimeout(refreshTimer);
+      refreshTimer = setTimeout(() => loadOrders(), 350);
+    };
+    const channel = supabase.channel("garageflow-crm-live")
+      .on("postgres_changes", { event:"*", schema:"public", table:"orders" }, refreshSoon)
+      .on("postgres_changes", { event:"*", schema:"public", table:"crm_tasks" }, refreshSoon)
+      .subscribe((status) => setLiveSync(status === "SUBSCRIBED" ? "live" : status === "CHANNEL_ERROR" ? "fallback" : "connecting"));
+    const fallback = setInterval(() => loadOrders(), 45000);
+    return () => { clearTimeout(refreshTimer); clearInterval(fallback); supabase.removeChannel(channel); };
+  }, [session?.user?.id]);
 
   async function getAccessToken() {
     const { data: { session } } = await supabase.auth.getSession();
@@ -739,7 +755,7 @@ export default function CrmApp() {
       ].filter(Boolean).join(" ").toLowerCase().includes(q);
       const matchesStatus = statusFilter === "all" || order.status === statusFilter;
       const matchesPriority = priorityFilter === "all" || (order.priority || "normal") === priorityFilter;
-      const matchesView = viewFilter === "all" || (viewFilter === "new" ? !order.viewed_at : !!order.viewed_at);
+      const matchesView = viewFilter === "all" || (viewFilter === "new" ? !order.viewed_at : viewFilter === "reschedule" ? order.booking_status === "reschedule_requested" : !!order.viewed_at);
       return matchesText && matchesStatus && matchesPriority && matchesView;
     });
   }, [orders, search, statusFilter, priorityFilter, viewFilter]);
@@ -806,6 +822,7 @@ export default function CrmApp() {
   const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.cost+=e.cost; acc.profit+=e.profit; return acc; }, {materialCost:0,laborCost:0,cost:0,profit:0});
   const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
   const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
+  const rescheduleOrders = orders.filter((o) => o.booking_status === "reschedule_requested" && o.status !== "cancelled");
   const newOrders = orders.filter((o) => o.status === "new").length;
   const doneOrders = orders.filter((o) => o.status === "done").length;
   const upcoming = scheduledOrders.filter((o) => new Date(o.scheduled_at) >= new Date()).slice(0, 5);
@@ -967,7 +984,7 @@ export default function CrmApp() {
         <header className="crmTopbar"><div><h1>{pageTitle}</h1><p>{pageSubtitle}</p></div>
           <div className="crmTopbarActions">
             <button type="button" className="crmMobileProfileButton" onClick={()=>setActivePage("profile")}><UserRound size={18}/><span>{employee?.display_name || "Профиль"}</span></button>
-            <button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
+            <span className={`crmLiveState crmLiveState-${liveSync}`}>{liveSync === "live" ? "● Live" : liveSync === "fallback" ? "Авто 45с" : "Подключение…"}</span><button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
           </div>
         </header>
         {error && <div className="crmError crmPageError">{error}</div>}
@@ -999,7 +1016,7 @@ export default function CrmApp() {
               <button type="button" className={`crmAttentionCard ${weekOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>setActivePage("calendar")}><CalendarDays size={21}/><div><span>Ближайшие 7 дней</span><strong>{weekOrders.length} записей</strong></div></button>
               <button type="button" className={`crmAttentionCard ${overdueOrders.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>setActivePage("orders")}><AlertTriangle size={21}/><div><span>Требуют внимания</span><strong>{overdueOrders.length} просрочено</strong></div></button>
               <button type="button" className={`crmAttentionCard ${urgentOrders.length ? "crmAttentionCardUrgent" : ""}`} onClick={()=>{setActivePage("orders");setPriorityFilter("urgent");}}><TrendingUp size={21}/><div><span>Срочные</span><strong>{urgentOrders.length} заказов</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${unseenOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>{setActivePage("orders");setViewFilter("new");}}><ClipboardList size={21}/><div><span>Новые заявки</span><strong>{unseenOrders.length} не просмотрено</strong></div></button>
+              <button type="button" className={`crmAttentionCard ${unseenOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>{setActivePage("orders");setViewFilter("new");}}><ClipboardList size={21}/><div><span>Новые заявки</span><strong>{unseenOrders.length} не просмотрено</strong></div></button><button type="button" className={`crmAttentionCard ${rescheduleOrders.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>{setActivePage("orders");setViewFilter("reschedule");}}><CalendarClock size={21}/><div><span>Запросы переноса</span><strong>{rescheduleOrders.length} требуют решения</strong></div></button>
               <button type="button" className={`crmAttentionCard ${overdueCrmTasks.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>setActivePage("orders")}><AlertTriangle size={21}/><div><span>Задачи</span><strong>{todayCrmTasks.length} сегодня · {overdueCrmTasks.length} просрочено</strong></div></button>
             </section>
             <section className="crmFunnelPanel">
@@ -1030,7 +1047,7 @@ export default function CrmApp() {
             <section className="crmToolbar crmToolbarSplit"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск по клиенту, автомобилю, номеру..."/></div><div className="crmOrderFilters"><select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)}><option value="all">Все статусы</option>{columns.map((c)=><option key={c.key} value={c.key}>{c.label}</option>)}</select><select value={priorityFilter} onChange={(e)=>setPriorityFilter(e.target.value)}><option value="all">Все приоритеты</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select><select value={viewFilter} onChange={(e)=>setViewFilter(e.target.value)}><option value="all">Все заявки</option><option value="new">Непросмотренные</option><option value="viewed">Просмотренные</option></select>{employee?.role !== "master" && <><button className={`crmFilterButton ${showCancelled ? "crmFilterButtonActive" : ""}`} type="button" onClick={()=>setShowCancelled((value)=>!value)}>Отменённые <span>{cancelledOrders.length}</span><ChevronDown size={16}/></button><button className="crmCreateButton" type="button" onClick={()=>setShowCreateOrder(true)}><Plus size={17}/>Новый заказ</button></>}</div></section>
             {showCancelled && <section className="crmCancelledPanel"><div className="crmPanelHeader"><div><h2>Отменённые заказы</h2><p>История отменённых заявок</p></div></div><div className="crmList">{cancelledOrders.length ? cancelledOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>openOrder(o)}><div className="crmListIcon"><Hash size={18}/></div><div className="crmListMain"><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Отменённых заказов нет</div>}</div></section>}
             <div className="crmMobileStatusTabs">{columns.map((column)=>{const count=filteredOrders.filter((o)=>o.status===column.key).length;return <button type="button" key={column.key} className={mobileOrderStatus===column.key?"active":""} onClick={()=>setMobileOrderStatus(column.key)}><span>{column.label}</span><b>{count}</b></button>})}</div>
-            <section className="crmBoard">{columns.map((column)=>{const columnOrders=filteredOrders.filter((o)=>o.status===column.key); return <div className={`crmColumn ${mobileOrderStatus===column.key?"crmMobileColumnActive":""}`} key={column.key}><div className="crmColumnHeader"><span>{column.label}</span><strong>{columnOrders.length}</strong></div><div className="crmColumnCards">{columnOrders.map((o)=><article key={o.id} className="crmOrderCard" onClick={()=>openOrder(o)}><div className="crmOrderTop"><span>Заказ №{o.id}{!o.viewed_at&&<b className="crmNewBadge">НОВАЯ</b>}</span><div className="crmOrderTopRight">{o.priority && o.priority!=="normal" && <span className={`crmPriorityBadge crmPriority-${o.priority}`}>{o.priority==="urgent"?"Срочный":"Высокий"}</span>}<ChevronRight size={17}/></div></div><h3>{getVehicleName(o.vehicle)}</h3><p className="crmCustomerName">{getCustomerName(o.customer)}</p><div className="crmServices">{o.items?.map((i)=>i.service_name).join(" • ")}</div>{o.scheduled_at&&<div className="crmOrderSchedule"><Clock3 size={14}/>{formatDate(o.scheduled_at)}</div>}<div className="crmOrderBottom">{employee?.role !== "master" && <strong>{formatPrice(orderAmount(o))}</strong>}<span>{formatDate(o.created_at)}</span></div></article>)}{!columnOrders.length&&<div className="crmEmptyColumn">Нет заказов</div>}</div></div>})}</section>
+            <section className="crmBoard">{columns.map((column)=>{const columnOrders=filteredOrders.filter((o)=>o.status===column.key); return <div className={`crmColumn ${mobileOrderStatus===column.key?"crmMobileColumnActive":""}`} key={column.key}><div className="crmColumnHeader"><span>{column.label}</span><strong>{columnOrders.length}</strong></div><div className="crmColumnCards">{columnOrders.map((o)=><article key={o.id} className="crmOrderCard" onClick={()=>openOrder(o)}><div className="crmOrderTop"><span>Заказ №{o.id}{!o.viewed_at&&<b className="crmNewBadge">НОВАЯ</b>}{o.booking_status==="reschedule_requested"&&<b className="crmMoveBadge">↪ ПЕРЕНОС</b>}</span><div className="crmOrderTopRight">{o.priority && o.priority!=="normal" && <span className={`crmPriorityBadge crmPriority-${o.priority}`}>{o.priority==="urgent"?"Срочный":"Высокий"}</span>}<ChevronRight size={17}/></div></div><h3>{getVehicleName(o.vehicle)}</h3><p className="crmCustomerName">{getCustomerName(o.customer)}</p><div className="crmServices">{o.items?.map((i)=>i.service_name).join(" • ")}</div>{o.scheduled_at&&<div className="crmOrderSchedule"><Clock3 size={14}/>{formatDate(o.scheduled_at)}</div>}<div className="crmOrderBottom">{employee?.role !== "master" && <strong>{formatPrice(orderAmount(o))}</strong>}<span>{formatDate(o.created_at)}</span></div></article>)}{!columnOrders.length&&<div className="crmEmptyColumn">Нет заказов</div>}</div></div>})}</section>
           </>}
 
           {activePage === "customers" && <section className="crmDataSection">
