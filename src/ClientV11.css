@@ -13,3 +13,6 @@
 
 /* GarageFlow v18.2 booking */
 .gfNextBooking{display:flex;align-items:center;justify-content:space-between;gap:16px;background:#fff;border:1px solid #dbe5f1;border-radius:22px;padding:18px 20px;margin:14px 0;cursor:pointer}.gfNextBooking h3{margin:5px 0;font-size:20px}.gfNextBooking p{margin:0;color:#7d8ca3}.gfBookingConfirmed{display:flex;align-items:center;gap:8px;margin:12px 0;padding:13px 15px;border-radius:14px;background:#ecfdf3;color:#18794e;font-weight:700}
+
+/* v18.4 booking proposal hierarchy */
+.gfManagerOffer{margin-top:12px;border-color:#b9d6ff;background:#f6faff}.gfManagerOffer+button{margin-top:12px}
