@@ -1320,7 +1320,7 @@ export default function CrmApp() {
         {(()=>{const econ=getOrderEconomics(selectedOrder);const tasks=productionData.tasks||[];const photos=productionData.photos||[];const checks=[
           {label:"Заявка принята",ok:!!selectedOrder.accepted_at},
           {label:"Запись",ok:!!selectedOrder.scheduled_at},
-          {label:"Мастер",ok:!!productionData.assigned_employee_id && adminData.employees.some(e=>Number(e.id)===Number(productionData.assigned_employee_id)&&e.role==="master"&&e.is_active!==false)},
+          {label:"Мастер",ok:!!(productionData.assigned_employee_id||selectedOrder.assigned_employee_id) && adminData.employees.some(e=>Number(e.id)===Number(productionData.assigned_employee_id||selectedOrder.assigned_employee_id)&&e.role==="master"&&e.is_active!==false)},
           {label:"Этапы работ",ok:tasks.length>0&&tasks.every(t=>t.status==="done")},
           {label:"Фото после",ok:photos.some(p=>p.kind==="after")},
           ...(employee?.role!=="master"?[{label:"Оплата",ok:econ.debt<=0}]:[]),
