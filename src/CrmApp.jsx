@@ -102,7 +102,7 @@ export default function CrmApp() {
   const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
   const [calendarView, setCalendarView] = useState("week");
   const [calendarAnchor, setCalendarAnchor] = useState(() => new Date());
-  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [], economics: [] });
+  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [], economics: [], payments: [] });
   const [showCreateOrder, setShowCreateOrder] = useState(false);
   const [orderHistory, setOrderHistory] = useState([]);
   const [newOrder, setNewOrder] = useState({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"", lead_source:"phone" });
@@ -123,6 +123,9 @@ export default function CrmApp() {
   const [materialDraft, setMaterialDraft] = useState({ inventory_item_id: "", quantity: "" });
   const [laborCostDraft, setLaborCostDraft] = useState("0");
   const [savingEconomics, setSavingEconomics] = useState(false);
+  const [paymentDraft, setPaymentDraft] = useState({ amount:"", method:"card", note:"" });
+  const [savingPayment, setSavingPayment] = useState(false);
+  const [masterPayDraft, setMasterPayDraft] = useState("0");
   const [crmTasks, setCrmTasks] = useState([]);
   const [orderTasks, setOrderTasks] = useState([]);
   const [taskDraft, setTaskDraft] = useState({ title:"", due_at:"", assigned_employee_id:"" });
@@ -233,6 +236,7 @@ export default function CrmApp() {
           inventory: extra.inventory || [],
           employees: extra.employees || [],
           economics: extra.economics || [],
+          payments: extra.payments || [],
         });
         if (extra.company_settings) {
           setCompanySettings((current) => ({ ...current, ...extra.company_settings }));
@@ -392,9 +396,10 @@ export default function CrmApp() {
         labor_cost: Number(data.labor_cost || 0),
       });
       setLaborCostDraft(String(Number(data.labor_cost || 0)));
+      setMasterPayDraft(String(Number(data.master_pay || 0)));
     } catch (err) {
       console.error("production_snapshot", err);
-      setProductionData({ tasks: [], materials: [], photos: [], assigned_employee_id: null, labor_cost: 0 });
+      setProductionData({ tasks: [], materials: [], photos: [], assigned_employee_id: null, labor_cost: 0, master_pay: 0 });
       setLaborCostDraft("0");
     } finally {
       setProductionLoading(false);
@@ -454,7 +459,7 @@ export default function CrmApp() {
       setMaterialDraft({ inventory_item_id:"", quantity:"" });
       await loadProduction(selectedOrder.id);
       const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
-      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[] });
+      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[], payments:extra.payments||[] });
       if (extra.company_settings) setCompanySettings((c)=>({...c,...extra.company_settings}));
     } catch(err) { setError(err instanceof Error?err.message:"Не удалось списать материал"); }
   }
@@ -465,16 +470,33 @@ export default function CrmApp() {
     if (!Number.isFinite(laborCost) || laborCost < 0) { setError("Проверьте стоимость труда"); return; }
     setSavingEconomics(true); setError("");
     try {
-      await invokeCrmFunction("crm-admin", { action:"save_order_economics", order_id:selectedOrder.id, labor_cost:laborCost });
+      await invokeCrmFunction("crm-admin", { action:"save_order_economics", order_id:selectedOrder.id, labor_cost:laborCost, master_pay:Number(masterPayDraft||0) });
       setProductionData((c)=>({...c,labor_cost:laborCost}));
       const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
-      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[] });
+      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[], payments:extra.payments||[] });
       if (extra.company_settings) setCompanySettings((c)=>({...c,...extra.company_settings}));
       const history = await invokeCrmFunction("crm-admin", { action:"history", order_id:selectedOrder.id });
       setOrderHistory(history.history||[]);
       setSaveMessage("Экономика заказа сохранена");
     } catch(err) { setError(err instanceof Error?err.message:"Не удалось сохранить экономику заказа"); }
     finally { setSavingEconomics(false); }
+  }
+
+  async function addPayment(event) {
+    event.preventDefault();
+    if (!selectedOrder) return;
+    const amount=Number(paymentDraft.amount||0);
+    if (!Number.isFinite(amount)||amount<=0) { setError("Укажите сумму платежа"); return; }
+    setSavingPayment(true); setError("");
+    try {
+      await invokeCrmFunction("crm-admin",{action:"add_payment",order_id:selectedOrder.id,amount,method:paymentDraft.method,note:paymentDraft.note});
+      setPaymentDraft({amount:"",method:"card",note:""});
+      const extra=await invokeCrmFunction("crm-admin",{action:"snapshot"});
+      setAdminData({services:extra.services||[],inventory:extra.inventory||[],employees:extra.employees||[],economics:extra.economics||[],payments:extra.payments||[]});
+      const h=await invokeCrmFunction("crm-admin",{action:"history",order_id:selectedOrder.id}); setOrderHistory(h.history||[]);
+      setSaveMessage("Платёж добавлен");
+    } catch(err){setError(err instanceof Error?err.message:"Не удалось добавить платёж");}
+    finally{setSavingPayment(false);}
   }
 
   async function saveCompanySettings() {
@@ -810,6 +832,8 @@ export default function CrmApp() {
 
   const totalRevenue = orders.filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + orderAmount(o), 0);
   const economicsByOrder = useMemo(() => new Map((adminData.economics || []).map((x)=>[Number(x.order_id), x])), [adminData.economics]);
+  const paymentsByOrder = useMemo(() => { const map=new Map(); (adminData.payments||[]).forEach((p)=>{const id=Number(p.order_id); const arr=map.get(id)||[]; arr.push(p); map.set(id,arr);}); return map; }, [adminData.payments]);
+  function getOrderPayments(order){ return paymentsByOrder.get(Number(order?.id))||[]; }
   function getOrderEconomics(order) {
     const saved = economicsByOrder.get(Number(order?.id)) || {};
     const materialCost = Number(saved.material_cost || 0);
@@ -818,9 +842,12 @@ export default function CrmApp() {
     const cost = materialCost + laborCost;
     const profit = revenue - cost;
     const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-    return { revenue, materialCost, laborCost, cost, profit, margin };
+    const masterPay = Number(saved.master_pay || 0);
+    const paid = getOrderPayments(order).reduce((sum,p)=>sum+Number(p.amount||0),0);
+    const debt = Math.max(0,revenue-paid);
+    return { revenue, materialCost, laborCost, masterPay, cost, profit, margin, paid, debt };
   }
-  const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.cost+=e.cost; acc.profit+=e.profit; return acc; }, {materialCost:0,laborCost:0,cost:0,profit:0});
+  const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.masterPay+=e.masterPay; acc.cost+=e.cost; acc.profit+=e.profit; acc.paid+=e.paid; acc.debt+=e.debt; return acc; }, {materialCost:0,laborCost:0,masterPay:0,cost:0,profit:0,paid:0,debt:0});
   const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
   const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
   const rescheduleOrders = orders.filter((o) => o.booking_status === "reschedule_requested" && o.status !== "cancelled");
@@ -1149,6 +1176,8 @@ export default function CrmApp() {
           {activePage === "analytics" && <>
             <section className="crmStats crmStatsFive">
               <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
+              <div className="crmStat"><span>Оплачено</span><strong>{formatPrice(businessEconomics.paid)}</strong></div>
+              <div className="crmStat"><span>Долг клиентов</span><strong>{formatPrice(businessEconomics.debt)}</strong></div>
               <div className="crmStat"><span>Материалы</span><strong>{formatPrice(businessEconomics.materialCost)}</strong></div>
               <div className="crmStat"><span>Труд</span><strong>{formatPrice(businessEconomics.laborCost)}</strong></div>
               <div className="crmStat"><span>Прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></div>
@@ -1226,6 +1255,7 @@ export default function CrmApp() {
             <button type="submit">Списать</button>
           </form>}
         </div>
+        {employee?.role !== "master" && <div className="crmModalSection crmV20Finance"><span className="crmModalLabel">Оплаты</span>{(()=>{const e=getOrderEconomics(selectedOrder);const payments=getOrderPayments(selectedOrder);return <><div className="crmV20MoneyGrid"><div><span>Стоимость заказа</span><strong>{formatPrice(e.revenue)}</strong></div><div><span>Оплачено</span><strong>{formatPrice(e.paid)}</strong></div><div className={e.debt>0?"debt":"ok"}><span>Остаток</span><strong>{formatPrice(e.debt)}</strong></div></div><div className="crmV20Payments">{payments.length?payments.map((p)=><div key={p.id}><div><strong>{formatPrice(p.amount)}</strong><span>{({cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"})[p.method]||p.method}{p.note?` · ${p.note}`:""}</span></div><small>{formatDate(p.paid_at||p.created_at)}</small></div>):<div className="crmEmptyState">Платежей пока нет</div>}</div><form className="crmV20PaymentForm" onSubmit={addPayment}><input type="number" min="1" step="1" required placeholder="Сумма, ₽" value={paymentDraft.amount} onChange={(ev)=>setPaymentDraft({...paymentDraft,amount:ev.target.value})}/><select value={paymentDraft.method} onChange={(ev)=>setPaymentDraft({...paymentDraft,method:ev.target.value})}><option value="card">Карта</option><option value="cash">Наличные</option><option value="transfer">Перевод</option><option value="invoice">Счёт</option></select><input placeholder="Комментарий" value={paymentDraft.note} onChange={(ev)=>setPaymentDraft({...paymentDraft,note:ev.target.value})}/><button type="submit" disabled={savingPayment}>{savingPayment?"Сохраняем...":"Добавить оплату"}</button></form></>})()}</div>}
         {employee?.role !== "master" && <div className="crmModalSection crmEconomicsSection">
           <span className="crmModalLabel">Экономика заказа</span>
           {(()=>{ const base=getOrderEconomics(selectedOrder); const materialCost=productionData.materials.reduce((sum,item)=>sum+Number(item.quantity||0)*Number(item.unit_price||0),0); const laborCost=Number(laborCostDraft||0); const cost=materialCost+laborCost; const profit=base.revenue-cost; const margin=base.revenue>0?(profit/base.revenue)*100:0; return <>
@@ -1233,11 +1263,12 @@ export default function CrmApp() {
               <div><span>Выручка</span><strong>{formatPrice(base.revenue)}</strong></div>
               <div><span>Материалы</span><strong>{formatPrice(materialCost)}</strong></div>
               <div><span>Труд</span><strong>{formatPrice(laborCost)}</strong></div>
+              <div><span>Начислено мастеру</span><strong>{formatPrice(Number(masterPayDraft||0))}</strong></div>
               <div><span>Себестоимость</span><strong>{formatPrice(cost)}</strong></div>
               <div className={profit<0?"crmEconomicsNegative":"crmEconomicsPositive"}><span>Валовая прибыль</span><strong>{formatPrice(profit)}</strong></div>
               <div><span>Маржа</span><strong>{margin.toFixed(1)}%</strong></div>
             </div>
-            {employee?.role === "admin" && <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>}
+            {employee?.role === "admin" && <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><label>Начисление мастеру, ₽<input type="number" min="0" step="1" value={masterPayDraft} onChange={(e)=>setMasterPayDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>}
             {employee?.role === "manager" && <div className="crmMasterNotice">Экономика доступна для просмотра. Фактическую стоимость труда изменяет администратор.</div>}
           </>; })()}
         </div>}
