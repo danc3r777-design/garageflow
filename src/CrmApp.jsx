@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
   BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
   CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
-  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send, Bell, Gauge,
+  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send, Bell, Gauge, WalletCards, Banknote,
 } from "lucide-react";
 
 const columns = [
@@ -32,6 +32,7 @@ const pageMeta = {
   vehicles: ["Автомобили", "Автомобили клиентов GarageFlow"],
   calendar: ["Календарь", "Запланированные работы и установки"],
   analytics: ["Аналитика", "Показатели GarageFlow по реальным заказам"],
+  finance: ["Финансы", "Касса, платежи, долги и начисления мастерам"],
   warehouse: ["Склад", "Материалы, остатки и минимальные запасы"],
   settings: ["Настройки", "Услуги, цены и сотрудники CRM"],
   profile: ["Профиль", "Текущий сотрудник и выход из CRM"],
@@ -84,6 +85,7 @@ export default function CrmApp() {
   const [error, setError] = useState("");
   const [search, setSearch] = useState("");
   const [activePage, setActivePage] = useState("overview");
+  const [financePeriod, setFinancePeriod] = useState("month");
   const [selectedOrder, setSelectedOrder] = useState(null);
   const [changingStatus, setChangingStatus] = useState(false);
   const [editingOrder, setEditingOrder] = useState({ final_price: "", manager_comment: "", scheduled_at: "", priority: "normal", lead_source: "unknown", cancellation_reason: "" });
@@ -137,8 +139,8 @@ export default function CrmApp() {
   useEffect(() => {
     if (!employee?.role) return;
     const allowedPages = {
-      admin: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","settings","profile"]),
-      manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","profile"]),
+      admin: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","warehouse","settings","profile"]),
+      manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","warehouse","profile"]),
       master: new Set(["overview","orders","calendar","warehouse","profile"]),
     };
     const allowed = allowedPages[employee.role] || allowedPages.master;
@@ -849,6 +851,22 @@ export default function CrmApp() {
   }
   const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.masterPay+=e.masterPay; acc.cost+=e.cost; acc.profit+=e.profit; acc.paid+=e.paid; acc.debt+=e.debt; return acc; }, {materialCost:0,laborCost:0,masterPay:0,cost:0,profit:0,paid:0,debt:0});
   const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
+  const financePeriodStart = useMemo(() => {
+    const d = new Date();
+    if (financePeriod === "day") return new Date(d.getFullYear(), d.getMonth(), d.getDate());
+    if (financePeriod === "week") { const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
+    if (financePeriod === "year") return new Date(d.getFullYear(),0,1);
+    return new Date(d.getFullYear(),d.getMonth(),1);
+  }, [financePeriod]);
+  const periodPayments = useMemo(() => (adminData.payments||[]).filter((p)=>new Date(p.paid_at||p.created_at)>=financePeriodStart).sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at)), [adminData.payments, financePeriodStart]);
+  const periodOrders = useMemo(() => orders.filter((o)=>o.status!=="cancelled" && new Date(o.created_at)>=financePeriodStart), [orders, financePeriodStart]);
+  const periodPaid = periodPayments.reduce((s,p)=>s+Number(p.amount||0),0);
+  const periodRevenue = periodOrders.reduce((s,o)=>s+orderAmount(o),0);
+  const periodEconomics = periodOrders.reduce((a,o)=>{const e=getOrderEconomics(o);a.cost+=e.cost;a.profit+=e.profit;a.masterPay+=e.masterPay;return a;},{cost:0,profit:0,masterPay:0});
+  const paymentMethodStats = useMemo(()=>{const labels={cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"};const m=new Map();periodPayments.forEach(p=>m.set(p.method,(m.get(p.method)||0)+Number(p.amount||0)));return [...m.entries()].map(([key,value])=>({key,label:labels[key]||key,value})).sort((a,b)=>b.value-a.value);},[periodPayments]);
+  const debtOrders = useMemo(()=>orders.filter(o=>o.status!=="cancelled"&&getOrderEconomics(o).debt>0).sort((a,b)=>getOrderEconomics(b).debt-getOrderEconomics(a).debt),[orders,adminData.economics,adminData.payments]);
+  const masterFinance = useMemo(()=>(adminData.employees||[]).filter(m=>m.is_active&&m.role==="master").map(m=>{const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(m.id));const pay=own.reduce((s,o)=>s+getOrderEconomics(o).masterPay,0);const done=own.filter(o=>o.status==="done").length;return {master:m,orders:own.length,done,pay};}).sort((a,b)=>b.pay-a.pay),[adminData.employees,orders,adminData.economics]);
+
   const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
   const rescheduleOrders = orders.filter((o) => o.booking_status === "reschedule_requested" && o.status !== "cancelled");
   const unreadOrders = orders.filter((o) => !o.viewed_at && o.status !== "cancelled");
@@ -1042,11 +1060,11 @@ export default function CrmApp() {
   const allMenu = [
     ["overview", LayoutDashboard, "Обзор"], ["orders", ClipboardList, "Заказы"],
     ["customers", Users, "Клиенты"], ["vehicles", Car, "Автомобили"], ["calendar", CalendarDays, "Календарь"],
-    ["analytics", BarChart3, "Аналитика"], ["warehouse", Package, "Склад"], ["settings", Settings, "Настройки"],
+    ["analytics", BarChart3, "Аналитика"], ["finance", WalletCards, "Финансы"], ["warehouse", Package, "Склад"], ["settings", Settings, "Настройки"],
   ];
   const rolePages = {
     admin: new Set(allMenu.map(([key])=>key)),
-    manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","warehouse","profile"]),
+    manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","warehouse","profile"]),
     master: new Set(["overview","orders","calendar","warehouse","profile"]),
   };
   const menu = allMenu.filter(([key]) => (rolePages[employee?.role] || rolePages.master).has(key));
@@ -1095,9 +1113,9 @@ export default function CrmApp() {
               <div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div>
               <div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>
               {employee?.role !== "master" && <>
-                <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
+                <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></button>
                 <div className="crmStat"><span>Себестоимость</span><strong>{formatPrice(businessEconomics.cost)}</strong></div>
-                <div className="crmStat"><span>Валовая прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></div>
+                <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Валовая прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></button>
                 <div className="crmStat"><span>Маржа</span><strong>{businessMargin.toFixed(1)}%</strong></div>
               </>}
             </section>
@@ -1169,13 +1187,31 @@ export default function CrmApp() {
             <div className="crmDayAgenda"><div className="crmPanelHeader"><div><h2>{selectedCalendarDay ? `План на ${new Date(`${selectedCalendarDay}T12:00:00`).toLocaleDateString("ru-RU")}` : "Выберите день"}</h2><p>{selectedCalendarDay ? `${selectedDayOrders.length} записей` : "Нажмите на день в календаре"}</p></div><CalendarClock size={20}/></div>{selectedCalendarDay && <div className="crmList">{selectedDayOrders.length ? selectedDayOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmCalendarTime">{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · Заказ №{o.id}</span></div><div className="crmCalendarStatus">{statusLabels[o.status]||o.status}</div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">На этот день записей нет</div>}</div>}</div>
           </section>}
 
+          {activePage === "finance" && employee?.role !== "master" && <section className="crmDataSection crmV21FinancePage">
+            <div className="crmV21Period"><strong>Период</strong>{[["day","Сегодня"],["week","Неделя"],["month","Месяц"],["year","Год"]].map(([k,l])=><button type="button" key={k} className={financePeriod===k?"active":""} onClick={()=>setFinancePeriod(k)}>{l}</button>)}</div>
+            <section className="crmStats crmV21FinanceStats">
+              <div className="crmStat"><span>Продано работ</span><strong>{formatPrice(periodRevenue)}</strong></div>
+              <div className="crmStat"><span>Поступило в кассу</span><strong>{formatPrice(periodPaid)}</strong></div>
+              <button type="button" className="crmStat crmV21StatButton crmV21DebtStat" onClick={()=>document.getElementById("crm-v21-debts")?.scrollIntoView({behavior:"smooth"})}><span>Долги клиентов</span><strong>{formatPrice(businessEconomics.debt)}</strong></button>
+              <div className="crmStat"><span>Себестоимость</span><strong>{formatPrice(periodEconomics.cost)}</strong></div>
+              <div className="crmStat"><span>Валовая прибыль</span><strong>{formatPrice(periodEconomics.profit)}</strong></div>
+              <div className="crmStat"><span>Начислено мастерам</span><strong>{formatPrice(periodEconomics.masterPay)}</strong></div>
+            </section>
+            <div className="crmAnalyticsGrid">
+              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Касса</h2><p>Платежи за выбранный период</p></div><Banknote size={20}/></div><div className="crmV21MethodList">{paymentMethodStats.length?paymentMethodStats.map(x=><div key={x.key}><span>{x.label}</span><strong>{formatPrice(x.value)}</strong></div>):<div className="crmEmptyState">Платежей за период нет</div>}</div></div>
+              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Начисления мастерам</h2><p>По назначенным заказам</p></div><Users size={20}/></div><div className="crmV21MethodList">{masterFinance.length?masterFinance.map(x=><div key={x.master.id}><span><b>{x.master.display_name||`Мастер #${x.master.id}`}</b><small>{x.orders} заказ. · {x.done} готово</small></span><strong>{formatPrice(x.pay)}</strong></div>):<div className="crmEmptyState">Активных мастеров нет</div>}</div></div>
+            </div>
+            <div className="crmPanel crmV21Journal"><div className="crmPanelHeader"><div><h2>Журнал платежей</h2><p>{periodPayments.length} операций за период</p></div><WalletCards size={20}/></div><div className="crmV21Table">{periodPayments.length?periodPayments.map(p=>{const o=orders.find(x=>Number(x.id)===Number(p.order_id));return <button type="button" key={p.id} onClick={()=>o&&goToOrder(o)}><span>{formatDate(p.paid_at||p.created_at)}</span><span><b>Заказ №{p.order_id}</b><small>{o?`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`:""}</small></span><span>{({cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"})[p.method]||p.method}</span><strong>{formatPrice(p.amount)}</strong><ChevronRight size={16}/></button>}):<div className="crmEmptyState">Платежей за выбранный период нет</div>}</div></div>
+            <div id="crm-v21-debts" className="crmPanel crmV21Journal"><div className="crmPanelHeader"><div><h2>Долги клиентов</h2><p>Заказы с неоплаченным остатком</p></div><AlertTriangle size={20}/></div><div className="crmV21Table">{debtOrders.length?debtOrders.map(o=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><span>№{o.id}</span><span><b>{getVehicleName(o.vehicle)}</b><small>{getCustomerName(o.customer)}</small></span><span>Оплачено {formatPrice(getOrderEconomics(o).paid)}</span><strong>{formatPrice(getOrderEconomics(o).debt)}</strong><ChevronRight size={16}/></button>):<div className="crmEmptyState">Задолженности нет</div>}</div></div>
+          </section>}
+
           {activePage === "warehouse" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Остатки материалов</h2><p>{adminData.inventory.length} позиций</p></div><Boxes size={20}/></div><div className="crmInventoryList">{adminData.inventory.length ? adminData.inventory.map((item)=><div className={`crmInventoryRow ${Number(item.quantity)<=Number(item.min_quantity)?"crmInventoryLow":""}`} key={item.id}><div><strong>{item.name}</strong><span>{formatPrice(item.price)} / {item.unit}</span></div><div><span>Остаток</span><strong>{item.quantity} {item.unit}</strong></div><div><span>Минимум</span><strong>{item.min_quantity} {item.unit}</strong></div></div>) : <div className="crmEmptyState">Добавьте первый материал</div>}</div></div><form className="crmPanel crmV4Form" onSubmit={saveInventory}><div className="crmPanelHeader"><div><h2>Добавить материал</h2><p>Контроль складских остатков</p></div><Plus size={20}/></div><label>Название<input required value={inventoryForm.name} onChange={(e)=>setInventoryForm({...inventoryForm,name:e.target.value})}/></label><div className="crmFormRow"><label>Ед. изм.<input value={inventoryForm.unit} onChange={(e)=>setInventoryForm({...inventoryForm,unit:e.target.value})}/></label><label>Остаток<input type="number" min="0" step="0.01" value={inventoryForm.quantity} onChange={(e)=>setInventoryForm({...inventoryForm,quantity:e.target.value})}/></label></div><div className="crmFormRow"><label>Мин. остаток<input type="number" min="0" step="0.01" value={inventoryForm.min_quantity} onChange={(e)=>setInventoryForm({...inventoryForm,min_quantity:e.target.value})}/></label><label>Цена<input type="number" min="0" value={inventoryForm.price} onChange={(e)=>setInventoryForm({...inventoryForm,price:e.target.value})}/></label></div><button className="crmCreateButton" type="submit"><Save size={17}/>Сохранить</button></form></div></section>}
 
           {activePage === "settings" && employee?.role === "admin" && <section className="crmDataSection"><div className="crmPanel crmLaunchPanel"><div className="crmPanelHeader"><div><h2>Готовность к запуску</h2><p>Чек-лист перед передачей GarageFlow новой компании</p></div><strong className="crmLaunchScore">{launchReadyCount}/{launchChecklist.length}</strong></div><div className="crmLaunchChecklist">{launchChecklist.map((item)=><div key={item.key} className={item.done?"crmLaunchItem crmLaunchItemDone":"crmLaunchItem"}><span>{item.done?"✓":"○"}</span><strong>{item.label}</strong></div>)}</div><p className="crmHint">Для новой компании создавайте отдельные Supabase, Telegram-бот и Vercel-проект. Эта мастер-версия не требует изменения бизнес-логики под каждого клиента.</p></div><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Услуги и цены</h2><p>Изменения применяются к новым заказам</p></div><Wrench size={20}/></div>{employee?.role === "admin" ? <><div className="crmServiceEditorList">{adminData.services.map((svc)=>{const draft=getServiceDraft(svc);return <div className={`crmServiceEditor ${draft.is_active?"":"crmServiceEditorDisabled"}`} key={svc.id}><div className="crmServiceEditorFields"><label>Название<input value={draft.name} onChange={(e)=>updateServiceDraft(svc,"name",e.target.value)}/></label><label>Цена, ₽<input type="number" min="0" step="1" value={draft.base_price} onChange={(e)=>updateServiceDraft(svc,"base_price",e.target.value)}/></label><label className="crmServiceDescription">Описание<input value={draft.description} onChange={(e)=>updateServiceDraft(svc,"description",e.target.value)}/></label></div><div className="crmServiceEditorActions"><label className="crmServiceToggle"><input type="checkbox" checked={draft.is_active} onChange={(e)=>updateServiceDraft(svc,"is_active",e.target.checked)}/><span>{draft.is_active?"Активна":"Отключена"}</span></label><button className="crmCreateButton" type="button" disabled={savingServiceId===svc.id} onClick={()=>saveService(svc)}><Save size={16}/>{savingServiceId===svc.id?"Сохраняем...":"Сохранить"}</button></div></div>})}</div><form className="crmNewServiceForm" onSubmit={createService}><div><h3>Добавить услугу</h3><p>Новая услуга сразу появится в каталоге и при создании заказа</p></div><div className="crmFormRow"><label>Название<input required value={newService.name} onChange={(e)=>setNewService({...newService,name:e.target.value})}/></label><label>Цена, ₽<input required type="number" min="0" step="1" value={newService.base_price} onChange={(e)=>setNewService({...newService,base_price:e.target.value})}/></label></div><label>Описание<input value={newService.description} onChange={(e)=>setNewService({...newService,description:e.target.value})}/></label><button className="crmCreateButton" type="submit" disabled={savingServiceId==="new"}><Plus size={16}/>{savingServiceId==="new"?"Добавляем...":"Добавить услугу"}</button></form></> : <p className="crmHint">Изменять услуги и цены может только администратор.</p>}</div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Telegram-уведомления</h2><p>Что отправлять клиенту при изменении заказа</p></div><AtSign size={20}/></div><div className="crmNotifySettings"><label><input type="checkbox" checked={notificationSettings.status_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,status_enabled:e.target.checked})}/><span><strong>Изменение статуса</strong><small>Согласование, производство, установка, готово и отмена</small></span></label><label><input type="checkbox" checked={notificationSettings.price_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,price_enabled:e.target.checked})}/><span><strong>Изменение стоимости</strong><small>Сообщить клиенту новую итоговую цену</small></span></label><label><input type="checkbox" checked={notificationSettings.schedule_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,schedule_enabled:e.target.checked})}/><span><strong>Дата записи</strong><small>Сообщить о новой дате и времени</small></span></label></div><button className="crmCreateButton" type="button" disabled={savingNotificationSettings} onClick={saveNotificationSettings}><Save size={16}/>{savingNotificationSettings?"Сохраняем...":"Сохранить уведомления"}</button></div><div className="crmPanel crmCompanySettings"><div className="crmPanelHeader"><div><h2>Реквизиты и документы</h2><p>Используются в КП и заказ-нарядах</p></div><FileText size={20}/></div>{employee?.role === "admin" ? <><label>Название компании<input value={companySettings.company_name||""} onChange={(e)=>setCompanySettings({...companySettings,company_name:e.target.value})}/></label><label>Юридическое название<input value={companySettings.legal_name||""} onChange={(e)=>setCompanySettings({...companySettings,legal_name:e.target.value})}/></label><div className="crmFormRow"><label>ИНН<input value={companySettings.inn||""} onChange={(e)=>setCompanySettings({...companySettings,inn:e.target.value})}/></label><label>КПП<input value={companySettings.kpp||""} onChange={(e)=>setCompanySettings({...companySettings,kpp:e.target.value})}/></label></div><label>Адрес<input value={companySettings.address||""} onChange={(e)=>setCompanySettings({...companySettings,address:e.target.value})}/></label><div className="crmFormRow"><label>Телефон<input value={companySettings.phone||""} onChange={(e)=>setCompanySettings({...companySettings,phone:e.target.value})}/></label><label>Email<input value={companySettings.email||""} onChange={(e)=>setCompanySettings({...companySettings,email:e.target.value})}/></label></div><label>Банковские реквизиты<textarea rows="3" value={companySettings.bank_details||""} onChange={(e)=>setCompanySettings({...companySettings,bank_details:e.target.value})}/></label><label>Текст внизу документа<textarea rows="2" value={companySettings.document_footer||""} onChange={(e)=>setCompanySettings({...companySettings,document_footer:e.target.value})}/></label><button className="crmCreateButton" type="button" disabled={savingCompanySettings} onClick={saveCompanySettings}><Save size={16}/>{savingCompanySettings?"Сохраняем...":"Сохранить реквизиты"}</button></> : <p className="crmHint">Изменять реквизиты может только администратор.</p>}</div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Сотрудники</h2><p>Доступ к CRM</p></div><Users size={20}/></div><div className="crmSettingsList">{adminData.employees.map((emp)=><div className="crmSettingsRow crmEmployeeAdminRow" key={emp.id}><div><strong>{emp.display_name||"Сотрудник"}</strong><span>{roleLabels[emp.role]||emp.role}</span></div>{employee?.role==="admin"?<><select className="crmEmployeeRole" value={emp.role||"master"} disabled={savingEmployeeId===emp.id} onChange={(e)=>saveEmployeeProfile(emp,{role:e.target.value})}><option value="admin">Администратор</option><option value="manager">Менеджер</option><option value="master">Мастер</option></select><label className="crmEmployeeActive"><input type="checkbox" checked={emp.is_active!==false} disabled={savingEmployeeId===emp.id||emp.id===employee?.id} onChange={(e)=>saveEmployeeProfile(emp,{is_active:e.target.checked})}/><span>{emp.is_active?"Активен":"Отключён"}</span></label><button type="button" className="crmEmployeeTelegram" onClick={()=>saveEmployeeTelegram(emp)}>{emp.telegram_chat_id?"Telegram ✓":"+ Telegram"}</button></>:<span className={emp.is_active?"crmActiveDot":"crmInactiveDot"}>{emp.is_active?"Активен":"Отключён"}</span>}</div>)}</div><p className="crmHint">Роли: администратор — полный доступ; менеджер — продажи, клиенты, документы и аналитика; мастер — только назначенные заказы, производство, материалы, задачи и календарь. Права на критические действия проверяются сервером.</p></div></div></section>}
 
           {activePage === "analytics" && <>
             <section className="crmStats crmStatsFive">
-              <div className="crmStat"><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></div>
+              <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></button>
               <div className="crmStat"><span>Оплачено</span><strong>{formatPrice(businessEconomics.paid)}</strong></div>
               <div className="crmStat"><span>Долг клиентов</span><strong>{formatPrice(businessEconomics.debt)}</strong></div>
               <div className="crmStat"><span>Материалы</span><strong>{formatPrice(businessEconomics.materialCost)}</strong></div>
