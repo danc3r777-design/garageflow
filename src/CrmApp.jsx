@@ -941,16 +941,46 @@ export default function CrmApp() {
   const weekDays = useMemo(() => Array.from({length:7},(_,i)=>{ const date=new Date(weekStart); date.setDate(date.getDate()+i); const key=calendarDateKey(date); return {date,key,orders:scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===key)}; }), [weekStart, scheduledOrders]);
   const weekOperational = useMemo(() => weekDays.map((day) => {
     const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-    const hours = {};
-    bookings.forEach((o)=>{const d=new Date(o.scheduled_at);const key=`${String(d.getHours()).padStart(2,"0")}:00`;hours[key]=(hours[key]||0)+1;});
-    const conflicts = Object.entries(hours).filter(([,count])=>count>SERVICE_BAYS_COUNT);
-    return {...day, bookings, peak:Math.max(0,...Object.values(hours)), conflicts};
+    const lanes = Array.from({length:SERVICE_BAYS_COUNT},()=>[]);
+    const conflicts = [];
+    const placed = [];
+    bookings.forEach((o)=>{
+      const start = new Date(o.scheduled_at);
+      const duration = Math.max(30, Number(o.service_duration_minutes || 120));
+      const end = new Date(start.getTime()+duration*60000);
+      const preferred = Number(o.service_bay || 0);
+      const fits=(lane)=>lanes[lane].every((x)=>end<=x.start || start>=x.end);
+      let lane = -1;
+      if(preferred>=1 && preferred<=SERVICE_BAYS_COUNT){
+        lane=preferred-1;
+        if(!fits(lane)) conflicts.push({order:o,start,end});
+      } else {
+        lane=lanes.findIndex((_,idx)=>fits(idx));
+        if(lane<0){ conflicts.push({order:o,start,end}); lane=0; }
+      }
+      const item={order:o,start,end,lane,conflict:conflicts.some((x)=>x.order.id===o.id)};
+      lanes[lane].push(item); placed.push(item);
+    });
+    let peak=0;
+    for(let h=9;h<20;h+=0.5){const t=new Date(day.date);t.setHours(Math.floor(h),h%1?30:0,0,0);peak=Math.max(peak,placed.filter((x)=>x.start<=t&&x.end>t).length);}
+    return {...day, bookings, lanes, placed, peak, conflicts};
   }), [weekDays]);
   const weekTitle = `${weekDays[0].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short"})} — ${weekDays[6].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"})}`;
   const unscheduledOrders = orders.filter((o)=>!o.scheduled_at && !["done","cancelled"].includes(o.status));
   const selectedDayOrders = selectedCalendarDay
     ? scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===selectedCalendarDay)
     : [];
+  async function assignServiceBay(order, bay) {
+    if (employee?.role === "master") return;
+    try {
+      const { data, error: rpcError } = await supabase.rpc("garageflow_set_service_bay", { p_order_id: Number(order.id), p_service_bay: bay ? Number(bay) : null });
+      if (rpcError) throw rpcError;
+      const updatedBay = data?.service_bay ?? (bay ? Number(bay) : null);
+      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,service_bay:updatedBay}:o));
+      if(selectedOrder?.id===order.id) setSelectedOrder((current)=>current?{...current,service_bay:updatedBay}:current);
+      setSaveMessage(bay ? `Заказ назначен на пост ${bay}` : "Пост снят");
+    } catch(err) { setError(err?.message || "Не удалось назначить рабочий пост"); }
+  }
   function jumpCalendarToday(){ const d=new Date(); setCalendarAnchor(d); setCalendarMonth(new Date(d.getFullYear(),d.getMonth(),1)); setSelectedCalendarDay(calendarDateKey(d)); }
   function moveCalendar(direction){ if(calendarView==="week") setCalendarAnchor((d)=>{const n=new Date(d);n.setDate(n.getDate()+direction*7);return n;}); else {setCalendarMonth((d)=>new Date(d.getFullYear(),d.getMonth()+direction,1));setSelectedCalendarDay(null);} }
   const [pageTitle, pageSubtitle] = pageMeta[activePage] || pageMeta.overview;
@@ -1088,7 +1118,8 @@ export default function CrmApp() {
             <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
             {calendarOpsView === "load" && <div className="crmV19Workload">
               <div className="crmV19Capacity"><div><span>Рабочих постов</span><strong>{SERVICE_BAYS_COUNT}</strong></div><div><span>Активных мастеров</span><strong>{activeMasters.length}</strong></div><div><span>Записей на неделе</span><strong>{weekOperational.reduce((sum,d)=>sum+d.bookings.length,0)}</strong></div><div><span>Конфликтов</span><strong>{weekOperational.reduce((sum,d)=>sum+d.conflicts.length,0)}</strong></div></div>
-              <div className="crmV19LoadGrid">{weekOperational.map((day)=><div className="crmV19LoadDay" key={day.key}><div className="crmV19LoadHead"><div><strong>{day.date.toLocaleDateString("ru-RU",{weekday:"short",day:"numeric"})}</strong><span>{day.bookings.length} запис.</span></div><b className={day.peak>SERVICE_BAYS_COUNT?"danger":day.peak===SERVICE_BAYS_COUNT?"busy":""}>{day.peak}/{SERVICE_BAYS_COUNT}</b></div>{day.bookings.map((o)=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><time>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</time><span><strong>{getVehicleName(o.vehicle)}</strong><small>{getCustomerName(o.customer)}</small></span></button>)}{!day.bookings.length&&<em>Свободно</em>}{day.conflicts.length>0&&<div className="crmV19Conflict"><AlertTriangle size={15}/> Перегрузка: {day.conflicts.map(([h,c])=>`${h} — ${c} авто`).join(", ")}</div>}</div>)}</div>
+              <div className="crmV191Legend"><span><i/>Рабочее время 09:00–20:00</span><span><i className="busy"/>Запись</span><span><i className="danger"/>Пересечение</span><small>Длительность по умолчанию — 2 часа</small></div>
+              <div className="crmV191Timeline">{weekOperational.map((day)=><div className={`crmV191Day ${day.conflicts.length?"hasConflict":""}`} key={day.key}><div className="crmV19LoadHead"><div><strong>{day.date.toLocaleDateString("ru-RU",{weekday:"short",day:"numeric"})}</strong><span>{day.bookings.length} запис.</span></div><b className={day.conflicts.length?"danger":day.peak>=SERVICE_BAYS_COUNT?"busy":""}>{day.peak}/{SERVICE_BAYS_COUNT}</b></div><div className="crmV191Scale"><span>09</span><span>11</span><span>13</span><span>15</span><span>17</span><span>19</span><span>20</span></div>{day.lanes.map((lane,laneIndex)=><div className="crmV191Bay" key={laneIndex}><div className="crmV191BayName">Пост {laneIndex+1}</div><div className="crmV191Track">{lane.map((item)=>{const startMin=item.start.getHours()*60+item.start.getMinutes();const endMin=item.end.getHours()*60+item.end.getMinutes();const left=Math.max(0,Math.min(100,((startMin-540)/660)*100));const width=Math.max(4,Math.min(100-left,((endMin-startMin)/660)*100));return <button type="button" title={`${getVehicleName(item.order.vehicle)} · ${item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}`} className={`crmV191Booking ${item.conflict?"conflict":""}`} style={{left:`${left}%`,width:`${width}%`}} key={item.order.id} onClick={()=>goToOrder(item.order)}><strong>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</strong><span>{getVehicleName(item.order.vehicle)}</span></button>})}</div></div>)}{day.bookings.length>0&&employee?.role!=="master"&&<div className="crmV191Assignments">{day.bookings.map((o)=><label key={o.id}><span>№{o.id} · {getVehicleName(o.vehicle)}</span><select value={o.service_bay||""} onChange={(e)=>assignServiceBay(o,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select></label>)}</div>}{day.conflicts.length>0&&<div className="crmV19Conflict"><AlertTriangle size={15}/> Пересечение: {day.conflicts.length} {day.conflicts.length===1?"запись":"записи"}. Назначьте другой пост или время.</div>}</div>)}</div>
               <div className="crmV19MasterLoad"><h3>Загрузка мастеров</h3><div>{activeMasters.map((master)=>{const tasks=crmTasks.filter((t)=>!t.is_done&&Number(t.assigned_employee_id)===Number(master.id));return <div className="crmV19MasterRow" key={master.id}><span><strong>{master.display_name}</strong><small>{tasks.length} открытых задач</small></span><b className={tasks.length>=5?"danger":tasks.length>=3?"busy":""}>{tasks.length}</b></div>})}{!activeMasters.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div>
             </div>}
             <div className="crmMonthToolbar"><button type="button" onClick={()=>moveCalendar(-1)}><ChevronLeft size={18}/></button><h2>{calendarView==="week"?weekTitle:monthTitle}</h2><button type="button" onClick={()=>moveCalendar(1)}><ChevronRight size={18}/></button></div>
