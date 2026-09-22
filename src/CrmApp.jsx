@@ -834,13 +834,6 @@ export default function CrmApp() {
     crmTasks.filter((t)=>!t.is_done && t.due_at && new Date(t.due_at)<new Date()).forEach((t)=>{const o=orders.find((x)=>Number(x.id)===Number(t.order_id));alerts.push({key:`task-${t.id}`,kind:"task",title:`Просрочена задача · заказ №${t.order_id}`,text:t.title,order:o});});
     return alerts.slice(0,20);
   }, [orders, crmTasks]);
-  const weekOperational = useMemo(() => weekDays.map((day) => {
-    const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-    const hours = {};
-    bookings.forEach((o)=>{const d=new Date(o.scheduled_at);const key=`${String(d.getHours()).padStart(2,"0")}:00`;hours[key]=(hours[key]||0)+1;});
-    const conflicts = Object.entries(hours).filter(([,count])=>count>SERVICE_BAYS_COUNT);
-    return {...day, bookings, peak:Math.max(0,...Object.values(hours)), conflicts};
-  }), [weekDays]);
   const newOrders = orders.filter((o) => o.status === "new").length;
   const doneOrders = orders.filter((o) => o.status === "done").length;
   const upcoming = scheduledOrders.filter((o) => new Date(o.scheduled_at) >= new Date()).slice(0, 5);
@@ -946,6 +939,13 @@ export default function CrmApp() {
   const calendarDateKey = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
   const weekStart = useMemo(() => { const d=new Date(calendarAnchor); const offset=(d.getDay()+6)%7; d.setHours(0,0,0,0); d.setDate(d.getDate()-offset); return d; }, [calendarAnchor]);
   const weekDays = useMemo(() => Array.from({length:7},(_,i)=>{ const date=new Date(weekStart); date.setDate(date.getDate()+i); const key=calendarDateKey(date); return {date,key,orders:scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===key)}; }), [weekStart, scheduledOrders]);
+  const weekOperational = useMemo(() => weekDays.map((day) => {
+    const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+    const hours = {};
+    bookings.forEach((o)=>{const d=new Date(o.scheduled_at);const key=`${String(d.getHours()).padStart(2,"0")}:00`;hours[key]=(hours[key]||0)+1;});
+    const conflicts = Object.entries(hours).filter(([,count])=>count>SERVICE_BAYS_COUNT);
+    return {...day, bookings, peak:Math.max(0,...Object.values(hours)), conflicts};
+  }), [weekDays]);
   const weekTitle = `${weekDays[0].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short"})} — ${weekDays[6].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"})}`;
   const unscheduledOrders = orders.filter((o)=>!o.scheduled_at && !["done","cancelled"].includes(o.status));
   const selectedDayOrders = selectedCalendarDay
