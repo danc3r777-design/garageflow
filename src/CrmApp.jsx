@@ -4,7 +4,7 @@ import {
   LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
   BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
   CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
-  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send,
+  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send, Bell, Gauge,
 } from "lucide-react";
 
 const columns = [
@@ -129,6 +129,7 @@ export default function CrmApp() {
   const [viewFilter, setViewFilter] = useState("all");
   const [savingEmployeeId, setSavingEmployeeId] = useState(null);
   const [liveSync, setLiveSync] = useState("connecting");
+  const [calendarOpsView, setCalendarOpsView] = useState("schedule");
 
   useEffect(() => {
     if (!employee?.role) return;
@@ -823,6 +824,23 @@ export default function CrmApp() {
   const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
   const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
   const rescheduleOrders = orders.filter((o) => o.booking_status === "reschedule_requested" && o.status !== "cancelled");
+  const unreadOrders = orders.filter((o) => !o.viewed_at && o.status !== "cancelled");
+  const activeMasters = adminData.employees.filter((x) => x.is_active && x.role === "master");
+  const SERVICE_BAYS_COUNT = 2;
+  const operationalAlerts = useMemo(() => {
+    const alerts = [];
+    orders.filter((o)=>o.booking_status === "reschedule_requested" && o.status !== "cancelled").forEach((o)=>alerts.push({key:`move-${o.id}`,kind:"move",title:`Клиент запросил перенос · заказ №${o.id}`,text:`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`,order:o}));
+    orders.filter((o)=>!o.viewed_at && o.status !== "cancelled").forEach((o)=>alerts.push({key:`new-${o.id}`,kind:"new",title:`Новая заявка · заказ №${o.id}`,text:`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`,order:o}));
+    crmTasks.filter((t)=>!t.is_done && t.due_at && new Date(t.due_at)<new Date()).forEach((t)=>{const o=orders.find((x)=>Number(x.id)===Number(t.order_id));alerts.push({key:`task-${t.id}`,kind:"task",title:`Просрочена задача · заказ №${t.order_id}`,text:t.title,order:o});});
+    return alerts.slice(0,20);
+  }, [orders, crmTasks]);
+  const weekOperational = useMemo(() => weekDays.map((day) => {
+    const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+    const hours = {};
+    bookings.forEach((o)=>{const d=new Date(o.scheduled_at);const key=`${String(d.getHours()).padStart(2,"0")}:00`;hours[key]=(hours[key]||0)+1;});
+    const conflicts = Object.entries(hours).filter(([,count])=>count>SERVICE_BAYS_COUNT);
+    return {...day, bookings, peak:Math.max(0,...Object.values(hours)), conflicts};
+  }), [weekDays]);
   const newOrders = orders.filter((o) => o.status === "new").length;
   const doneOrders = orders.filter((o) => o.status === "done").length;
   const upcoming = scheduledOrders.filter((o) => new Date(o.scheduled_at) >= new Date()).slice(0, 5);
@@ -1023,6 +1041,10 @@ export default function CrmApp() {
               <div className="crmPanelHeader"><div><h2>Воронка заказов</h2><p>Распределение по текущим статусам</p></div><BarChart3 size={20}/></div>
               <div className="crmFunnel">{funnel.map((item)=><div className="crmFunnelItem" key={item.key}><div className="crmFunnelTop"><span>{item.label}</span><strong>{item.count}</strong></div><div className="crmFunnelTrack"><div className="crmFunnelFill" style={{width:`${Math.max(item.count ? 12 : 0, (item.count/maxFunnel)*100)}%`}}/></div></div>)}</div>
             </section>
+            <section className="crmPanel crmV19Alerts">
+              <div className="crmPanelHeader"><div><h2>Центр уведомлений</h2><p>Новые заявки, переносы и просроченные задачи</p></div><div className="crmV19AlertCount"><Bell size={18}/><strong>{operationalAlerts.length}</strong></div></div>
+              <div className="crmV19AlertList">{operationalAlerts.length ? operationalAlerts.slice(0,6).map((alert)=><button type="button" key={alert.key} className={`crmV19Alert crmV19Alert-${alert.kind}`} onClick={()=>alert.order&&goToOrder(alert.order)}><span className="crmV19AlertIcon">{alert.kind==="move"?"↪":alert.kind==="task"?"!":"+"}</span><div><strong>{alert.title}</strong><small>{alert.text}</small></div><ChevronRight size={17}/></button>) : <div className="crmEmptyState">Новых уведомлений нет</div>}</div>
+            </section>
             <section className="crmDashboardGrid">
               <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Ближайшие записи</h2><p>Назначенные работы</p></div><CalendarClock size={20}/></div>
                 <div className="crmList">{upcoming.length ? upcoming.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmListIcon"><CalendarDays size={18}/></div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatDate(o.scheduled_at)}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Ближайших записей пока нет</div>}</div>
@@ -1063,6 +1085,12 @@ export default function CrmApp() {
           {activePage === "calendar" && <section className="crmMonthSection crmCalendarV14">
             <div className="crmCalendarSummary"><div><span>Сегодня</span><strong>{todayOrders.length}</strong></div><div><span>Ближайшие 7 дней</span><strong>{weekOrders.length}</strong></div><div><span>Без записи</span><strong>{unscheduledOrders.length}</strong></div><div className={overdueOrders.length?"crmCalendarAlert":""}><span>Просроченные</span><strong>{overdueOrders.length}</strong></div></div>
             <div className="crmCalendarControlBar"><div className="crmCalendarViewSwitch"><button className={calendarView==="week"?"active":""} onClick={()=>setCalendarView("week")}>Неделя</button><button className={calendarView==="month"?"active":""} onClick={()=>setCalendarView("month")}>Месяц</button></div><button className="crmTodayButton" onClick={jumpCalendarToday}>Сегодня</button></div>
+            <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
+            {calendarOpsView === "load" && <div className="crmV19Workload">
+              <div className="crmV19Capacity"><div><span>Рабочих постов</span><strong>{SERVICE_BAYS_COUNT}</strong></div><div><span>Активных мастеров</span><strong>{activeMasters.length}</strong></div><div><span>Записей на неделе</span><strong>{weekOperational.reduce((sum,d)=>sum+d.bookings.length,0)}</strong></div><div><span>Конфликтов</span><strong>{weekOperational.reduce((sum,d)=>sum+d.conflicts.length,0)}</strong></div></div>
+              <div className="crmV19LoadGrid">{weekOperational.map((day)=><div className="crmV19LoadDay" key={day.key}><div className="crmV19LoadHead"><div><strong>{day.date.toLocaleDateString("ru-RU",{weekday:"short",day:"numeric"})}</strong><span>{day.bookings.length} запис.</span></div><b className={day.peak>SERVICE_BAYS_COUNT?"danger":day.peak===SERVICE_BAYS_COUNT?"busy":""}>{day.peak}/{SERVICE_BAYS_COUNT}</b></div>{day.bookings.map((o)=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><time>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</time><span><strong>{getVehicleName(o.vehicle)}</strong><small>{getCustomerName(o.customer)}</small></span></button>)}{!day.bookings.length&&<em>Свободно</em>}{day.conflicts.length>0&&<div className="crmV19Conflict"><AlertTriangle size={15}/> Перегрузка: {day.conflicts.map(([h,c])=>`${h} — ${c} авто`).join(", ")}</div>}</div>)}</div>
+              <div className="crmV19MasterLoad"><h3>Загрузка мастеров</h3><div>{activeMasters.map((master)=>{const tasks=crmTasks.filter((t)=>!t.is_done&&Number(t.assigned_employee_id)===Number(master.id));return <div className="crmV19MasterRow" key={master.id}><span><strong>{master.display_name}</strong><small>{tasks.length} открытых задач</small></span><b className={tasks.length>=5?"danger":tasks.length>=3?"busy":""}>{tasks.length}</b></div>})}{!activeMasters.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div>
+            </div>}
             <div className="crmMonthToolbar"><button type="button" onClick={()=>moveCalendar(-1)}><ChevronLeft size={18}/></button><h2>{calendarView==="week"?weekTitle:monthTitle}</h2><button type="button" onClick={()=>moveCalendar(1)}><ChevronRight size={18}/></button></div>
             {calendarView === "week" ? <div className="crmWeekPlanner">{weekDays.map((cell)=>{const isToday=cell.key===calendarDateKey(new Date());return <button type="button" key={cell.key} className={`crmWeekPlannerDay ${isToday?"crmWeekPlannerToday":""} ${selectedCalendarDay===cell.key?"crmWeekPlannerSelected":""}`} onClick={()=>setSelectedCalendarDay(cell.key)}><div className="crmWeekPlannerHead"><span>{cell.date.toLocaleDateString("ru-RU",{weekday:"short"})}</span><strong>{cell.date.getDate()}</strong>{cell.orders.length > 0 && <b>{cell.orders.length}</b>}</div><div className="crmWeekPlannerEvents">{cell.orders.length?cell.orders.map((o)=><div className={`crmWeekPlannerEvent crmBooking-${o.booking_status||"none"}`} key={o.id}><time>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</time><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)}</span><small>{o.booking_status==="confirmed"?"Запись подтверждена":o.booking_status==="scheduled"?"Ждём клиента":o.booking_status==="reschedule_requested"?"Перенос":statusLabels[o.status]||o.status}</small></div>):<div className="crmWeekPlannerEmpty">Свободно</div>}</div></button>})}</div> : <><div className="crmWeekdays">{["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map((day)=><span key={day}>{day}</span>)}</div><div className="crmMonthGrid">{calendarDays.map((cell,index)=>cell ? <button type="button" key={cell.key} className={`crmMonthDay ${cell.orders.length ? "crmMonthDayBusy" : ""} ${selectedCalendarDay===cell.key ? "crmMonthDaySelected" : ""}`} onClick={()=>setSelectedCalendarDay(cell.key)}><span className="crmMonthNumber">{cell.day}{cell.orders.length>0&&<b className={`crmLoadBadge ${cell.orders.length>=4?"crmLoadHigh":cell.orders.length>=2?"crmLoadMedium":""}`}>{cell.orders.length}</b>}</span>{cell.orders.slice(0,2).map((o)=><span className={`crmMonthEvent crmBooking-${o.booking_status||"none"}`} key={o.id}>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))} · {getVehicleName(o.vehicle)}</span>)}{cell.orders.length>2&&<small>+ ещё {cell.orders.length-2}</small>}</button> : <div className="crmMonthDay crmMonthDayEmpty" key={`empty-${index}`}/>)}</div></>}
             <div className="crmDayAgenda"><div className="crmPanelHeader"><div><h2>{selectedCalendarDay ? `План на ${new Date(`${selectedCalendarDay}T12:00:00`).toLocaleDateString("ru-RU")}` : "Выберите день"}</h2><p>{selectedCalendarDay ? `${selectedDayOrders.length} записей` : "Нажмите на день в календаре"}</p></div><CalendarClock size={20}/></div>{selectedCalendarDay && <div className="crmList">{selectedDayOrders.length ? selectedDayOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmCalendarTime">{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · Заказ №{o.id}</span></div><div className="crmCalendarStatus">{statusLabels[o.status]||o.status}</div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">На этот день записей нет</div>}</div>}</div>
