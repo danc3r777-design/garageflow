@@ -1441,3 +1441,17 @@
 .crmV24Queue>button{width:100%;display:grid;grid-template-columns:58px 1fr 20px;gap:10px;align-items:center;border:0;border-top:1px solid #edf0f5;background:transparent;padding:11px 4px;text-align:left;cursor:pointer;color:inherit}.crmV24Queue>button:first-of-type{border-top:0}.crmV24Queue>button>b{color:#1769e0}.crmV24Queue>button span strong,.crmV24Queue>button span small{display:block}.crmV24Queue>button span small{color:#7c8aa0;margin-top:2px}
 .crmV24MasterLoad{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-top:1px solid #edf0f5}.crmV24MasterLoad:first-of-type{border-top:0}.crmV24MasterLoad span strong,.crmV24MasterLoad span small{display:block}.crmV24MasterLoad span small{color:#7c8aa0}.crmV24MasterLoad>b{font-size:20px}
 @media(max-width:900px){.crmV24Flow{grid-template-columns:repeat(2,minmax(0,1fr))}.crmV24CenterGrid{grid-template-columns:1fr}.crmV24WorkCenter{padding:14px}.crmV24Flow button{min-height:92px}.crmV24Flow strong{font-size:18px}}
+
+/* GarageFlow v25 - production readiness polish */
+.crmV25Workflow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin:12px 0 16px;padding:12px;border:1px solid #e5eaf1;border-radius:14px;background:#f8fafc}
+.crmV25WorkflowStep{display:grid;grid-template-columns:26px 1fr;align-items:center;gap:6px;min-width:0;color:#96a1b2}
+.crmV25WorkflowStep span{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#e9edf3;font-size:11px;font-weight:900}
+.crmV25WorkflowStep small{font-size:10px;font-weight:800;line-height:1.15}
+.crmV25WorkflowStep.complete{color:#258044}.crmV25WorkflowStep.complete span{background:#def4e5;color:#258044}
+.crmV25WorkflowStep.current{color:#1769e0}.crmV25WorkflowStep.current span{background:#1769e0;color:#fff;box-shadow:0 0 0 4px #e8f1ff}
+.crmV25WorkflowStep.cancelled{opacity:.55}
+.crmV25Readiness{border:1px solid #e5eaf1;border-radius:14px;padding:13px;margin-bottom:14px;background:#fff}
+.crmV25ReadinessHead{display:flex;justify-content:space-between;align-items:center;gap:12px}.crmV25ReadinessHead>div{display:grid;gap:2px}.crmV25ReadinessHead strong{font-size:13px}.crmV25ReadinessHead small{font-size:10px;color:#8793a6}.crmV25ReadinessHead b{font-size:18px;color:#1769e0}
+.crmV25ReadinessBar{height:7px;background:#edf1f6;border-radius:999px;overflow:hidden;margin:9px 0}.crmV25ReadinessBar i{display:block;height:100%;background:#1769e0;border-radius:999px;transition:width .2s ease}
+.crmV25Checks{display:flex;gap:6px;flex-wrap:wrap}.crmV25Checks span{font-size:10px;font-weight:800;border-radius:999px;padding:6px 8px;background:#f3f5f8;color:#7c899b}.crmV25Checks span.ok{background:#eaf8ee;color:#267640}.crmV25Checks span.pending{background:#fff7e8;color:#9a6200}
+@media(max-width:700px){.crmV25Workflow{grid-template-columns:1fr;gap:5px}.crmV25WorkflowStep{grid-template-columns:24px 1fr}.crmV25WorkflowStep span{width:24px;height:24px}.crmV25Checks{display:grid;grid-template-columns:1fr 1fr}.crmV25Checks span{text-align:center}.crmModalActions{position:sticky;bottom:calc(-20px - env(safe-area-inset-bottom));z-index:8;background:#fff;padding:10px 0 calc(12px + env(safe-area-inset-bottom));border-top:1px solid #edf1f6}}
