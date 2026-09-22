@@ -927,6 +927,13 @@ export default function CrmApp() {
   const openCrmTasks = crmTasks.filter((t)=>!t.is_done);
   const overdueCrmTasks = openCrmTasks.filter((t)=>t.due_at && new Date(t.due_at)<now);
   const todayCrmTasks = openCrmTasks.filter((t)=>{if(!t.due_at)return false;const d=new Date(t.due_at);return d>=todayStart&&d<todayEnd;});
+  const todayInWork = orders.filter((o)=>["production","installation"].includes(o.status));
+  const readyForDelivery = orders.filter((o)=>o.status==="done" && getOrderEconomics(o).debt>0);
+  const todayDone = orders.filter((o)=>o.status==="done" && new Date(o.updated_at||o.created_at)>=todayStart && new Date(o.updated_at||o.created_at)<todayEnd);
+  const todayPaid = (adminData.payments||[]).filter((p)=>{const d=new Date(p.paid_at||p.created_at);return d>=todayStart&&d<todayEnd;}).reduce((sum,p)=>sum+Number(p.amount||0),0);
+  const totalDebt = debtOrders.reduce((sum,o)=>sum+getOrderEconomics(o).debt,0);
+  const todayQueue = [...todayOrders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
+  const serviceWorkload = useMemo(()=>activeMasters.map((m)=>{const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(m.id)&&!["done","cancelled"].includes(o.status));return {master:m,count:own.length};}).sort((a,b)=>b.count-a.count),[activeMasters,orders]);
   const priorityCrmTasks = [...openCrmTasks].sort((a,b)=>{
     const ad=a.due_at?new Date(a.due_at).getTime():Number.MAX_SAFE_INTEGER;
     const bd=b.due_at?new Date(b.due_at).getTime():Number.MAX_SAFE_INTEGER;
@@ -1135,6 +1142,20 @@ export default function CrmApp() {
           </section>}
 
           {activePage === "overview" && <>
+            <section className="crmV24WorkCenter">
+              <div className="crmPanelHeader"><div><h2>Рабочий центр</h2><p>Что происходит в сервисе прямо сейчас</p></div><Gauge size={21}/></div>
+              <div className="crmV24Flow">
+                <button type="button" onClick={()=>setActivePage("calendar")}><span>Записано сегодня</span><strong>{todayOrders.length}</strong><small>автомобилей</small></button>
+                <button type="button" onClick={()=>setActivePage("orders")}><span>Сейчас в работе</span><strong>{todayInWork.length}</strong><small>заказов</small></button>
+                <button type="button" onClick={()=>setActivePage("orders")}><span>Готово сегодня</span><strong>{todayDone.length}</strong><small>заказов</small></button>
+                {employee?.role !== "master" && <button type="button" onClick={()=>setActivePage("finance")}><span>Оплачено сегодня</span><strong>{formatPrice(todayPaid)}</strong><small>факт поступлений</small></button>}
+                {employee?.role !== "master" && <button type="button" className={totalDebt>0?"warn":""} onClick={()=>setActivePage("finance")}><span>Долги клиентов</span><strong>{formatPrice(totalDebt)}</strong><small>{debtOrders.length} заказов</small></button>}
+              </div>
+              <div className="crmV24CenterGrid">
+                <div className="crmV24Queue"><h3>Сегодня по времени</h3>{todayQueue.length?todayQueue.map(o=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><b>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</b><span><strong>{getVehicleName(o.vehicle)}</strong><small>№{o.id} · {getCustomerName(o.customer)} · {statusLabels[o.status]||o.status}</small></span><ChevronRight size={16}/></button>):<div className="crmEmptyState">На сегодня записей нет</div>}</div>
+                <div className="crmV24Queue"><h3>Загрузка мастеров</h3>{serviceWorkload.length?serviceWorkload.map(x=><div className="crmV24MasterLoad" key={x.master.id}><span><strong>{x.master.display_name}</strong><small>активных заказов</small></span><b>{x.count}</b></div>):<div className="crmEmptyState">Активных мастеров нет</div>}</div>
+              </div>
+            </section>
             <section className="crmStats crmStatsFive">
               <div className="crmStat"><span>Новые заявки</span><strong>{newOrders}</strong></div>
               <div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div>
