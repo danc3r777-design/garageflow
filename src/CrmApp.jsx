@@ -1040,32 +1040,71 @@ export default function CrmApp() {
   const weekOperational = useMemo(() => weekDays.map((day) => {
     const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
     const lanes = Array.from({length:SERVICE_BAYS_COUNT},()=>[]);
-    const conflicts = [];
     const placed = [];
+    const conflictReasons = new Map();
+    const addConflict = (orderId, reason) => {
+      const current = conflictReasons.get(orderId) || [];
+      if (!current.includes(reason)) conflictReasons.set(orderId, [...current, reason]);
+    };
+    const overlaps = (aStart,aEnd,bStart,bEnd) => aStart < bEnd && aEnd > bStart;
+
     bookings.forEach((o)=>{
       const start = new Date(o.scheduled_at);
       const duration = Math.max(30, Number(o.service_duration_minutes || 120));
       const end = new Date(start.getTime()+duration*60000);
       const preferred = Number(o.service_bay || 0);
-      const fits=(lane)=>lanes[lane].every((x)=>end<=x.start || start>=x.end);
+      const fits=(lane)=>lanes[lane].every((x)=>!overlaps(start,end,x.start,x.end));
       let lane = -1;
+
       if(preferred>=1 && preferred<=SERVICE_BAYS_COUNT){
         lane=preferred-1;
-        if(!fits(lane)) conflicts.push({order:o,start,end});
+        const bayOverlaps = lanes[lane].filter((x)=>overlaps(start,end,x.start,x.end));
+        bayOverlaps.forEach((x)=>{
+          addConflict(o.id, `Пост ${preferred}: пересечение с заказом №${x.order.id}`);
+          addConflict(x.order.id, `Пост ${preferred}: пересечение с заказом №${o.id}`);
+        });
       } else {
         lane=lanes.findIndex((_,idx)=>fits(idx));
-        if(lane<0){ conflicts.push({order:o,start,end}); lane=0; }
+        if(lane<0){
+          lane=0;
+          const bayOverlaps = lanes[lane].filter((x)=>overlaps(start,end,x.start,x.end));
+          addConflict(o.id, "Нет свободного рабочего поста на это время");
+          bayOverlaps.forEach((x)=>addConflict(x.order.id, `Пересечение по загрузке постов с заказом №${o.id}`));
+        }
       }
+
       const workStart = new Date(day.date); workStart.setHours(9,0,0,0);
       const workEnd = new Date(day.date); workEnd.setHours(20,0,0,0);
       const outsideHours = start < workStart || end > workEnd;
-      const item={order:o,start,end,lane,conflict:conflicts.some((x)=>x.order.id===o.id),outsideHours};
+      const item={order:o,start,end,lane,conflict:false,conflictReasons:[],outsideHours};
       lanes[lane].push(item); placed.push(item);
     });
+
+    // Один мастер не может физически вести два заказа одновременно.
+    for(let i=0;i<placed.length;i+=1){
+      const a=placed[i];
+      const aMaster=Number(a.order.assigned_employee_id||a.order.employee_id||0);
+      if(!aMaster) continue;
+      for(let j=i+1;j<placed.length;j+=1){
+        const b=placed[j];
+        const bMaster=Number(b.order.assigned_employee_id||b.order.employee_id||0);
+        if(aMaster===bMaster && overlaps(a.start,a.end,b.start,b.end)){
+          const masterName=activeMasters.find((m)=>Number(m.id)===aMaster)?.display_name || "Мастер";
+          addConflict(a.order.id, `${masterName}: одновременно назначен на заказ №${b.order.id}`);
+          addConflict(b.order.id, `${masterName}: одновременно назначен на заказ №${a.order.id}`);
+        }
+      }
+    }
+
+    placed.forEach((item)=>{
+      item.conflictReasons=conflictReasons.get(item.order.id)||[];
+      item.conflict=item.conflictReasons.length>0;
+    });
+    const conflicts=placed.filter((item)=>item.conflict);
     let peak=0;
     for(let h=9;h<20;h+=0.5){const t=new Date(day.date);t.setHours(Math.floor(h),h%1?30:0,0,0);peak=Math.max(peak,placed.filter((x)=>x.start<=t&&x.end>t).length);}
     return {...day, bookings, lanes, placed, peak, conflicts};
-  }), [weekDays]);
+  }), [weekDays, activeMasters]);
   const weekTitle = `${weekDays[0].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short"})} — ${weekDays[6].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"})}`;
   const todayKey = calendarDateKey(new Date());
   const todayOperational = weekOperational.find((day)=>day.key===todayKey) || {bookings:[],lanes:Array.from({length:SERVICE_BAYS_COUNT},()=>[]),placed:[],conflicts:[],peak:0};
@@ -1282,9 +1321,9 @@ export default function CrmApp() {
             <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="today"?"active":""} onClick={()=>{setCalendarOpsView("today");jumpCalendarToday();}}><CalendarClock size={16}/> Сегодня</button><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
             {calendarOpsView === "today" && <div className="crmV27Today">
               <div className="crmV27TodayStats"><div><span>Запланировано</span><strong>{todayOrders.length}</strong><small>{todayAssignedMinutes} мин. работ</small></div><div><span>В работе</span><strong>{todayScheduledInWork}</strong><small>производство / установка</small></div><div><span>Готово</span><strong>{todayReady}</strong><small>за сегодня в плане</small></div><div className={todayOperational.conflicts.length?"danger":""}><span>Загрузка постов</span><strong>{todayLoadPercent}%</strong><small>{todayOperational.conflicts.length?`${todayOperational.conflicts.length} конфликт(а)`:"без пересечений"}</small></div></div>
-              <div className="crmV27DispatchGrid"><div className="crmPanel crmV27Dispatch"><div className="crmPanelHeader"><div><h2>Диспетчерская на сегодня</h2><p>09:00–20:00 · {SERVICE_BAYS_COUNT} рабочих поста</p></div><Gauge size={20}/></div>{Array.from({length:SERVICE_BAYS_COUNT},(_,bayIndex)=>{const lane=todayOperational.lanes[bayIndex]||[];return <div className="crmV27BayRow" key={bayIndex}><div className="crmV27BayTitle"><strong>Пост {bayIndex+1}</strong><span>{lane.reduce((sum,x)=>sum+Number(x.order.service_duration_minutes||120),0)} мин.</span></div><div className="crmV27BayJobs">{lane.length?lane.map((item)=><div className={`crmV27Job ${item.conflict?"conflict":""}`} key={item.order.id}><button type="button" className="crmV27JobMain" onClick={()=>goToOrder(item.order)}><time>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}–{item.end.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</time><strong>№{item.order.id} · {getVehicleName(item.order.vehicle)}</strong><span>{getCustomerName(item.order.customer)} · {statusLabels[item.order.status]||item.order.status}</span></button>{employee?.role!=="master"&&<div className="crmV27Quick"><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,-30)}>−30</button><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,30)}>+30</button><select value={item.order.service_bay||""} onChange={(e)=>assignServiceBay(item.order,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select><select value={item.order.assigned_employee_id||""} disabled={plannerBusyOrderId===item.order.id} onChange={(e)=>plannerAssignMaster(item.order,e.target.value)}><option value="">Без мастера</option>{activeMasters.map((m)=><option value={m.id} key={m.id}>{m.display_name}</option>)}</select></div>}</div>):<div className="crmV27BayEmpty">Пост свободен</div>}</div></div>})}</div>
+              <div className="crmV27DispatchGrid"><div className="crmPanel crmV27Dispatch"><div className="crmPanelHeader"><div><h2>Диспетчерская на сегодня</h2><p>09:00–20:00 · {SERVICE_BAYS_COUNT} рабочих поста</p></div><Gauge size={20}/></div>{Array.from({length:SERVICE_BAYS_COUNT},(_,bayIndex)=>{const lane=todayOperational.lanes[bayIndex]||[];return <div className="crmV27BayRow" key={bayIndex}><div className="crmV27BayTitle"><strong>Пост {bayIndex+1}</strong><span>{lane.reduce((sum,x)=>sum+Number(x.order.service_duration_minutes||120),0)} мин.</span></div><div className="crmV27BayJobs">{lane.length?lane.map((item)=><div className={`crmV27Job ${item.conflict?"conflict":""}`} key={item.order.id}><button type="button" className="crmV27JobMain" onClick={()=>goToOrder(item.order)}><time>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}–{item.end.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</time><strong>№{item.order.id} · {getVehicleName(item.order.vehicle)}</strong><span>{getCustomerName(item.order.customer)} · {statusLabels[item.order.status]||item.order.status}</span>{item.conflict&&<em className="crmV272JobWarning"><AlertTriangle size={13}/>{item.conflictReasons[0]}</em>}</button>{employee?.role!=="master"&&<div className="crmV27Quick"><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,-30)}>−30</button><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,30)}>+30</button><select value={item.order.service_bay||""} onChange={(e)=>assignServiceBay(item.order,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select><select value={item.order.assigned_employee_id||""} disabled={plannerBusyOrderId===item.order.id} onChange={(e)=>plannerAssignMaster(item.order,e.target.value)}><option value="">Без мастера</option>{activeMasters.map((m)=><option value={m.id} key={m.id}>{m.display_name}</option>)}</select></div>}</div>):<div className="crmV27BayEmpty">Пост свободен</div>}</div></div>})}</div>
               <div className="crmV27Side"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Мастера сегодня</h2><p>Плановая загрузка по заказам</p></div><Users size={20}/></div><div className="crmV27MasterList">{todayMasterLoad.map((row)=><div key={row.master.id}><span><strong>{row.master.display_name}</strong><small>{row.orders.length} заказ(а)</small></span><b>{Math.floor(row.minutes/60)}ч {row.minutes%60}м</b></div>)}{!todayMasterLoad.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Без записи</h2><p>Нужно назначить время</p></div><AlertTriangle size={20}/></div><div className="crmV27Unscheduled">{unscheduledOrders.slice(0,8).map((o)=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><span><strong>№{o.id} · {getVehicleName(o.vehicle)}</strong><small>{getCustomerName(o.customer)}</small></span><ChevronRight size={16}/></button>)}{!unscheduledOrders.length&&<div className="crmEmptyState">Все активные заказы запланированы</div>}</div></div></div></div>
-              {todayOperational.conflicts.length>0&&<div className="crmV27ConflictBanner"><AlertTriangle size={18}/><div><strong>Есть пересечения по рабочим постам</strong><span>Откройте конфликтующий заказ и измените пост или сдвиньте время на 30 минут.</span></div></div>}
+              {todayOperational.conflicts.length>0&&<div className="crmV27ConflictBanner"><AlertTriangle size={18}/><div><strong>Найдено конфликтов: {todayOperational.conflicts.length}</strong><span>Красным отмечены заказы с пересечением рабочего поста или занятости мастера. Измените пост, мастера или время.</span><div className="crmV272ConflictDetails">{todayOperational.conflicts.map((item)=><button type="button" key={item.order.id} onClick={()=>goToOrder(item.order)}><b>№{item.order.id}</b> · {item.conflictReasons.join(" · ")}</button>)}</div></div></div>}
             </div>}
             {calendarOpsView === "load" && <div className="crmV19Workload">
               <div className="crmV19Capacity"><div><span>Рабочих постов</span><strong>{SERVICE_BAYS_COUNT}</strong></div><div><span>Активных мастеров</span><strong>{activeMasters.length}</strong></div><div><span>Записей на неделе</span><strong>{weekOperational.reduce((sum,d)=>sum+d.bookings.length,0)}</strong></div><div><span>Конфликтов</span><strong>{weekOperational.reduce((sum,d)=>sum+d.conflicts.length,0)}</strong></div></div>
