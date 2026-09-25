@@ -142,6 +142,7 @@ export default function CrmApp() {
   const [savingEmployeeId, setSavingEmployeeId] = useState(null);
   const [liveSync, setLiveSync] = useState("connecting");
   const [calendarOpsView, setCalendarOpsView] = useState("schedule");
+  const [plannerBusyOrderId, setPlannerBusyOrderId] = useState(null);
 
   useEffect(() => {
     if (!employee?.role) return;
@@ -1066,6 +1067,17 @@ export default function CrmApp() {
     return {...day, bookings, lanes, placed, peak, conflicts};
   }), [weekDays]);
   const weekTitle = `${weekDays[0].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short"})} — ${weekDays[6].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"})}`;
+  const todayKey = calendarDateKey(new Date());
+  const todayOperational = weekOperational.find((day)=>day.key===todayKey) || {bookings:[],lanes:Array.from({length:SERVICE_BAYS_COUNT},()=>[]),placed:[],conflicts:[],peak:0};
+  const todayInWork = todayOrders.filter((o)=>["production","installation"].includes(o.status)).length;
+  const todayReady = todayOrders.filter((o)=>o.status==="done").length;
+  const todayAssignedMinutes = todayOrders.reduce((sum,o)=>sum+Number(o.service_duration_minutes||120),0);
+  const todayCapacityMinutes = SERVICE_BAYS_COUNT * 11 * 60;
+  const todayLoadPercent = Math.min(999, Math.round((todayAssignedMinutes/Math.max(1,todayCapacityMinutes))*100));
+  const todayMasterLoad = activeMasters.map((master)=>{
+    const own=todayOrders.filter((o)=>Number(o.assigned_employee_id||o.employee_id||0)===Number(master.id));
+    return {master,orders:own,minutes:own.reduce((sum,o)=>sum+Number(o.service_duration_minutes||120),0)};
+  }).sort((a,b)=>b.minutes-a.minutes);
   const unscheduledOrders = orders.filter((o)=>!o.scheduled_at && !["done","cancelled"].includes(o.status));
   const selectedDayOrders = selectedCalendarDay
     ? scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===selectedCalendarDay)
@@ -1092,6 +1104,32 @@ export default function CrmApp() {
       if(selectedOrder?.id===order.id) setSelectedOrder((current)=>current?{...current,service_duration_minutes:updatedDuration}:current);
       setSaveMessage(`Длительность записи: ${updatedDuration} мин.`);
     } catch(err) { setError(err?.message || "Не удалось изменить длительность записи"); }
+  }
+  async function plannerAssignMaster(order, employeeId) {
+    if (employee?.role === "master") return;
+    setPlannerBusyOrderId(order.id); setError("");
+    try {
+      const value=employeeId?Number(employeeId):null;
+      await invokeCrmFunction("crm-admin", { action:"assign_employee", order_id:order.id, employee_id:value });
+      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,assigned_employee_id:value}:o));
+      if(selectedOrder?.id===order.id){setSelectedOrder((current)=>current?{...current,assigned_employee_id:value}:current);setProductionData((c)=>({...c,assigned_employee_id:value}));}
+      setSaveMessage(value?"Мастер назначен":"Мастер снят");
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось назначить мастера"); }
+    finally { setPlannerBusyOrderId(null); }
+  }
+  async function plannerShiftBooking(order, deltaMinutes) {
+    if (employee?.role === "master" || !order.scheduled_at) return;
+    setPlannerBusyOrderId(order.id); setError(""); setSaveMessage("");
+    try {
+      const next=new Date(new Date(order.scheduled_at).getTime()+Number(deltaMinutes)*60000);
+      const data=await invokeCrmFunction("crm-admin",{action:"schedule_booking",order_id:order.id,scheduled_at:next.toISOString(),accept_requested:false});
+      const updated={...order,...(data.order||{}),scheduled_at:data.order?.scheduled_at||next.toISOString()};
+      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,...updated}:o));
+      if(selectedOrder?.id===order.id){setSelectedOrder((current)=>current?{...current,...updated}:current);setEditingOrder((current)=>({...current,scheduled_at:getDateTimeLocalValue(updated.scheduled_at)}));}
+      await notifyOrder(order.id,"schedule_changed");
+      setSaveMessage(`Заказ №${order.id}: время перенесено на ${formatDate(updated.scheduled_at)}. Ожидаем подтверждения клиента.`);
+    } catch(err) { setError(err instanceof Error?err.message:"Не удалось перенести запись"); }
+    finally { setPlannerBusyOrderId(null); }
   }
   function jumpCalendarToday(){ const d=new Date(); setCalendarAnchor(d); setCalendarMonth(new Date(d.getFullYear(),d.getMonth(),1)); setSelectedCalendarDay(calendarDateKey(d)); }
   function moveCalendar(direction){ if(calendarView==="week") setCalendarAnchor((d)=>{const n=new Date(d);n.setDate(n.getDate()+direction*7);return n;}); else {setCalendarMonth((d)=>new Date(d.getFullYear(),d.getMonth()+direction,1));setSelectedCalendarDay(null);} }
@@ -1241,7 +1279,13 @@ export default function CrmApp() {
           {activePage === "calendar" && <section className="crmMonthSection crmCalendarV14">
             <div className="crmCalendarSummary"><div><span>Сегодня</span><strong>{todayOrders.length}</strong></div><div><span>Ближайшие 7 дней</span><strong>{weekOrders.length}</strong></div><div><span>Без записи</span><strong>{unscheduledOrders.length}</strong></div><div className={overdueOrders.length?"crmCalendarAlert":""}><span>Просроченные</span><strong>{overdueOrders.length}</strong></div></div>
             <div className="crmCalendarControlBar"><div className="crmCalendarViewSwitch"><button className={calendarView==="week"?"active":""} onClick={()=>setCalendarView("week")}>Неделя</button><button className={calendarView==="month"?"active":""} onClick={()=>setCalendarView("month")}>Месяц</button></div><button className="crmTodayButton" onClick={jumpCalendarToday}>Сегодня</button></div>
-            <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
+            <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="today"?"active":""} onClick={()=>{setCalendarOpsView("today");jumpCalendarToday();}}><CalendarClock size={16}/> Сегодня</button><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
+            {calendarOpsView === "today" && <div className="crmV27Today">
+              <div className="crmV27TodayStats"><div><span>Запланировано</span><strong>{todayOrders.length}</strong><small>{todayAssignedMinutes} мин. работ</small></div><div><span>В работе</span><strong>{todayInWork}</strong><small>производство / установка</small></div><div><span>Готово</span><strong>{todayReady}</strong><small>за сегодня в плане</small></div><div className={todayOperational.conflicts.length?"danger":""}><span>Загрузка постов</span><strong>{todayLoadPercent}%</strong><small>{todayOperational.conflicts.length?`${todayOperational.conflicts.length} конфликт(а)`:"без пересечений"}</small></div></div>
+              <div className="crmV27DispatchGrid"><div className="crmPanel crmV27Dispatch"><div className="crmPanelHeader"><div><h2>Диспетчерская на сегодня</h2><p>09:00–20:00 · {SERVICE_BAYS_COUNT} рабочих поста</p></div><Gauge size={20}/></div>{Array.from({length:SERVICE_BAYS_COUNT},(_,bayIndex)=>{const lane=todayOperational.lanes[bayIndex]||[];return <div className="crmV27BayRow" key={bayIndex}><div className="crmV27BayTitle"><strong>Пост {bayIndex+1}</strong><span>{lane.reduce((sum,x)=>sum+Number(x.order.service_duration_minutes||120),0)} мин.</span></div><div className="crmV27BayJobs">{lane.length?lane.map((item)=><div className={`crmV27Job ${item.conflict?"conflict":""}`} key={item.order.id}><button type="button" className="crmV27JobMain" onClick={()=>goToOrder(item.order)}><time>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}–{item.end.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</time><strong>№{item.order.id} · {getVehicleName(item.order.vehicle)}</strong><span>{getCustomerName(item.order.customer)} · {statusLabels[item.order.status]||item.order.status}</span></button>{employee?.role!=="master"&&<div className="crmV27Quick"><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,-30)}>−30</button><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,30)}>+30</button><select value={item.order.service_bay||""} onChange={(e)=>assignServiceBay(item.order,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select><select value={item.order.assigned_employee_id||""} disabled={plannerBusyOrderId===item.order.id} onChange={(e)=>plannerAssignMaster(item.order,e.target.value)}><option value="">Без мастера</option>{activeMasters.map((m)=><option value={m.id} key={m.id}>{m.display_name}</option>)}</select></div>}</div>):<div className="crmV27BayEmpty">Пост свободен</div>}</div></div>})}</div>
+              <div className="crmV27Side"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Мастера сегодня</h2><p>Плановая загрузка по заказам</p></div><Users size={20}/></div><div className="crmV27MasterList">{todayMasterLoad.map((row)=><div key={row.master.id}><span><strong>{row.master.display_name}</strong><small>{row.orders.length} заказ(а)</small></span><b>{Math.floor(row.minutes/60)}ч {row.minutes%60}м</b></div>)}{!todayMasterLoad.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Без записи</h2><p>Нужно назначить время</p></div><AlertTriangle size={20}/></div><div className="crmV27Unscheduled">{unscheduledOrders.slice(0,8).map((o)=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><span><strong>№{o.id} · {getVehicleName(o.vehicle)}</strong><small>{getCustomerName(o.customer)}</small></span><ChevronRight size={16}/></button>)}{!unscheduledOrders.length&&<div className="crmEmptyState">Все активные заказы запланированы</div>}</div></div></div></div>
+              {todayOperational.conflicts.length>0&&<div className="crmV27ConflictBanner"><AlertTriangle size={18}/><div><strong>Есть пересечения по рабочим постам</strong><span>Откройте конфликтующий заказ и измените пост или сдвиньте время на 30 минут.</span></div></div>}
+            </div>}
             {calendarOpsView === "load" && <div className="crmV19Workload">
               <div className="crmV19Capacity"><div><span>Рабочих постов</span><strong>{SERVICE_BAYS_COUNT}</strong></div><div><span>Активных мастеров</span><strong>{activeMasters.length}</strong></div><div><span>Записей на неделе</span><strong>{weekOperational.reduce((sum,d)=>sum+d.bookings.length,0)}</strong></div><div><span>Конфликтов</span><strong>{weekOperational.reduce((sum,d)=>sum+d.conflicts.length,0)}</strong></div></div>
               <div className="crmV191Legend"><span><i/>Рабочее время 09:00–20:00</span><span><i className="busy"/>Запись</span><span><i className="danger"/>Пересечение</span><small>Длительность по умолчанию — 2 часа</small></div>
