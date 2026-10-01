@@ -1461,3 +1461,16 @@
 
 /* GarageFlow v27.2 — conflict control */
 .crmV272JobWarning{grid-column:2;display:flex;align-items:center;gap:5px;margin-top:4px;color:#b42318;font-size:10px;font-style:normal;font-weight:800;white-space:normal}.crmV27Job.conflict .crmV27JobMain time{color:#c63f3f}.crmV272ConflictDetails{display:grid;gap:5px;margin-top:7px}.crmV272ConflictDetails button{border:0;background:rgba(255,255,255,.72);color:#8f2424;border-radius:9px;padding:7px 9px;text-align:left;font:inherit;font-size:11px;cursor:pointer}.crmV272ConflictDetails button:hover{background:#fff}@media(max-width:760px){.crmV272JobWarning{grid-column:1/-1}}
+
+/* GarageFlow v27.3 — mobile order modal actions hotfix */
+@media (max-width:700px){
+  .crmModalActions{
+    position:static!important;
+    bottom:auto!important;
+    z-index:auto!important;
+    background:transparent!important;
+    padding:0!important;
+    border-top:0!important;
+    margin-top:22px!important;
+  }
+}
