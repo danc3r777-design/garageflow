@@ -1,1480 +1,1476 @@
-import React, { useEffect, useMemo, useState } from "react";
-import { supabase } from "./supabase.js";
-import {
-  LayoutDashboard, ClipboardList, Users, Car, CalendarDays, Package,
-  BarChart3, Settings, LogOut, RefreshCw, Search, ChevronRight, X,
-  CheckCircle2, Clock3, UserRound, Phone, AtSign, Hash, CalendarClock,
-  CircleDollarSign, Wrench, ArrowRight, ChevronLeft, ChevronDown, AlertTriangle, TrendingUp, CalendarCheck, Plus, Save, Boxes, History, Pencil, FileText, Printer, Send, Bell, Gauge, WalletCards, Banknote, Truck, UserCog, PackagePlus,
-} from "lucide-react";
-
-const columns = [
-  { key: "new", label: "Новая заявка" },
-  { key: "approval", label: "Согласование" },
-  { key: "production", label: "Производство" },
-  { key: "installation", label: "Установка" },
-  { key: "done", label: "Готово" },
-];
-
-const statusLabels = {
-  new: "Новая заявка", approval: "Согласование", production: "Производство",
-  installation: "Установка", done: "Готово", cancelled: "Отменён",
-};
-
-const leadSourceLabels = { telegram:"Telegram Mini App", phone:"Телефон", website:"Сайт", recommendation:"Рекомендация", whatsapp:"WhatsApp", manual:"Вручную", other:"Другое", unknown:"Не указан" };
-const roleLabels = { admin:"Администратор", manager:"Менеджер", master:"Мастер" };
-
-const cancellationReasonLabels = { expensive:"Дорого", changed_mind:"Передумал", competitor:"Выбрал конкурента", no_contact:"Не удалось связаться", timing:"Не устроили сроки", other:"Другое" };
-
-const pageMeta = {
-  overview: ["Обзор", "Главное по GarageFlow на сегодня"],
-  orders: ["Заказы", "Управление заявками GarageFlow"],
-  customers: ["Клиенты", "Клиенты и история их заказов"],
-  vehicles: ["Автомобили", "Автомобили клиентов GarageFlow"],
-  calendar: ["Календарь", "Запланированные работы и установки"],
-  analytics: ["Аналитика", "Показатели GarageFlow по реальным заказам"],
-  finance: ["Финансы", "Касса, платежи, долги и начисления мастерам"],
-  staff: ["Персонал", "Выработка, начисления и выплаты мастерам"],
-  warehouse: ["Склад", "Материалы, остатки и минимальные запасы"],
-  settings: ["Настройки", "Услуги, цены и сотрудники CRM"],
-  profile: ["Профиль", "Текущий сотрудник и выход из CRM"],
-};
-
-function formatPrice(value) {
-  return new Intl.NumberFormat("ru-RU").format(Number(value || 0)) + " ₽";
-}
-function formatDate(value) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("ru-RU", {
-    day: "2-digit", month: "2-digit", year: "numeric", hour: "2-digit", minute: "2-digit",
-  }).format(new Date(value));
-}
-function formatDay(value) {
-  if (!value) return "";
-  return new Intl.DateTimeFormat("ru-RU", {
-    weekday: "long", day: "2-digit", month: "long", year: "numeric",
-  }).format(new Date(value));
-}
-function getCustomerName(customer) {
-  if (!customer) return "Клиент";
-  return [customer.first_name, customer.last_name].filter(Boolean).join(" ") || customer.username || "Клиент";
-}
-function getVehicleName(vehicle) {
-  if (!vehicle) return "Автомобиль не указан";
-  return [vehicle.brand, vehicle.model, vehicle.configuration].filter(Boolean).join(" ");
-}
-function getDateTimeLocalValue(value) {
-  if (!value) return "";
-  const date = new Date(value);
-  if (Number.isNaN(date.getTime())) return "";
-  const localDate = new Date(date.getTime() - date.getTimezoneOffset() * 60000);
-  return localDate.toISOString().slice(0, 16);
-}
-function orderAmount(order) {
-  return Number(order.final_price ?? order.preliminary_price ?? 0);
+.crm,
+.crmLoginPage {
+  font-family:
+    Inter,
+    -apple-system,
+    BlinkMacSystemFont,
+    "Segoe UI",
+    sans-serif;
 }
 
-export default function CrmApp() {
-  const [session, setSession] = useState(null);
-  const [checkingAuth, setCheckingAuth] = useState(true);
-  const [email, setEmail] = useState("");
-  const [password, setPassword] = useState("");
-  const [loginLoading, setLoginLoading] = useState(false);
-  const [loginError, setLoginError] = useState("");
-  const [employee, setEmployee] = useState(null);
-  const [orders, setOrders] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState("");
-  const [search, setSearch] = useState("");
-  const [activePage, setActivePage] = useState("overview");
-  const [financePeriod, setFinancePeriod] = useState("month");
-  const [selectedOrder, setSelectedOrder] = useState(null);
-  const [changingStatus, setChangingStatus] = useState(false);
-  const [editingOrder, setEditingOrder] = useState({ final_price: "", manager_comment: "", scheduled_at: "", priority: "normal", lead_source: "unknown", cancellation_reason: "" });
-  const [savingOrder, setSavingOrder] = useState(false);
-  const [saveMessage, setSaveMessage] = useState("");
-  const [selectedCustomer, setSelectedCustomer] = useState(null);
-  const [selectedVehicle, setSelectedVehicle] = useState(null);
-  const [showCancelled, setShowCancelled] = useState(false);
-  const [statusFilter, setStatusFilter] = useState("all");
-  const [mobileOrderStatus, setMobileOrderStatus] = useState("new");
-  const [priorityFilter, setPriorityFilter] = useState("all");
-  const [calendarMonth, setCalendarMonth] = useState(() => {
-    const now = new Date();
-    return new Date(now.getFullYear(), now.getMonth(), 1);
-  });
-  const [selectedCalendarDay, setSelectedCalendarDay] = useState(null);
-  const [calendarView, setCalendarView] = useState("week");
-  const [calendarAnchor, setCalendarAnchor] = useState(() => new Date());
-  const [adminData, setAdminData] = useState({ services: [], inventory: [], employees: [], economics: [], payments: [], suppliers: [], receipts: [], reservations: [], payouts: [] });
-  const [showCreateOrder, setShowCreateOrder] = useState(false);
-  const [orderHistory, setOrderHistory] = useState([]);
-  const [newOrder, setNewOrder] = useState({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"", lead_source:"phone" });
-  const [inventoryForm, setInventoryForm] = useState({ name:"", unit:"шт", quantity:"", min_quantity:"", price:"" });
-  const [supplierForm,setSupplierForm]=useState({name:"",phone:"",email:"",note:""});
-  const [receiptForm,setReceiptForm]=useState({inventory_item_id:"",supplier_id:"",quantity:"",unit_price:"",note:""});
-  const [payoutDraft,setPayoutDraft]=useState({employee_id:"",amount:"",method:"cash",note:""});
-  const [staffPeriod,setStaffPeriod]=useState("month");
-  const [selectedMasterId,setSelectedMasterId]=useState(null);
-  const [serviceDrafts, setServiceDrafts] = useState({});
-  const [newService, setNewService] = useState({ name:"", description:"", base_price:"", is_active:true });
-  const [savingServiceId, setSavingServiceId] = useState(null);
-  const [notificationSettings, setNotificationSettings] = useState({ status_enabled:true, price_enabled:true, schedule_enabled:true });
-  const [savingNotificationSettings, setSavingNotificationSettings] = useState(false);
-  const [companySettings, setCompanySettings] = useState({ company_name:"GarageFlow", legal_name:"", inn:"", kpp:"", address:"", phone:"", email:"", bank_details:"", document_footer:"" });
-  const [savingCompanySettings, setSavingCompanySettings] = useState(false);
-  const [sendingDocument, setSendingDocument] = useState("");
-  const [productionData, setProductionData] = useState({ tasks: [], materials: [], assigned_employee_id: null, labor_cost: 0 });
-  const [productionLoading, setProductionLoading] = useState(false);
-  const [newTaskTitle, setNewTaskTitle] = useState("");
-  const [addingProductionTask, setAddingProductionTask] = useState(false);
-  const [productionTaskDraft, setProductionTaskDraft] = useState({ assigned_employee_id:"", due_at:"" });
-  const [uploadingProductionPhoto, setUploadingProductionPhoto] = useState(false);
-  const [materialDraft, setMaterialDraft] = useState({ inventory_item_id: "", quantity: "" });
-  const [laborCostDraft, setLaborCostDraft] = useState("0");
-  const [savingEconomics, setSavingEconomics] = useState(false);
-  const [paymentDraft, setPaymentDraft] = useState({ amount:"", method:"card", note:"" });
-  const [savingPayment, setSavingPayment] = useState(false);
-  const [masterPayDraft, setMasterPayDraft] = useState("0");
-  const [crmTasks, setCrmTasks] = useState([]);
-  const [orderTasks, setOrderTasks] = useState([]);
-  const [taskDraft, setTaskDraft] = useState({ title:"", due_at:"", assigned_employee_id:"" });
-  const [viewFilter, setViewFilter] = useState("all");
-  const [savingEmployeeId, setSavingEmployeeId] = useState(null);
-  const [liveSync, setLiveSync] = useState("connecting");
-  const [calendarOpsView, setCalendarOpsView] = useState("schedule");
-  const [plannerBusyOrderId, setPlannerBusyOrderId] = useState(null);
+.crmLoginPage {
+  min-height: 100vh;
+  display: grid;
+  place-items: center;
+  padding: 25px;
+  background: #eef2f7;
+}
 
-  useEffect(() => {
-    if (!employee?.role) return;
-    const allowedPages = {
-      admin: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","staff","warehouse","settings","profile"]),
-      manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","staff","warehouse","profile"]),
-      master: new Set(["overview","orders","calendar","warehouse","profile"]),
-    };
-    const allowed = allowedPages[employee.role] || allowedPages.master;
-    if (!allowed.has(activePage)) {
-      setActivePage("overview");
-      setSelectedOrder(null);
-      setSearch("");
-    }
-  }, [employee?.role, activePage]);
+.crmLoginCard {
+  width: 100%;
+  max-width: 420px;
+  background: white;
+  padding: 38px;
+  border-radius: 24px;
+  box-shadow:
+    0 20px 60px
+    rgba(18, 35, 63, 0.12);
+}
 
-  useEffect(() => {
-    let mounted = true;
-    async function initialize() {
-      const { data: { session } } = await supabase.auth.getSession();
-      if (!mounted) return;
-      setSession(session);
-      setCheckingAuth(false);
-      if (session) await loadOrders();
-    }
-    initialize();
-    const { data: subscription } = supabase.auth.onAuthStateChange((_event, nextSession) => setSession(nextSession));
-    return () => { mounted = false; subscription.subscription.unsubscribe(); };
-  }, []);
+.crmBrand {
+  font-size: 28px;
+  font-weight: 800;
+  letter-spacing: -1px;
+  color: #10203a;
+}
 
-  useEffect(() => {
-    if (!session?.user?.id) return;
-    let refreshTimer = null;
-    const refreshSoon = () => {
-      clearTimeout(refreshTimer);
-      refreshTimer = setTimeout(() => loadOrders(), 350);
-    };
-    const channel = supabase.channel("garageflow-crm-live")
-      .on("postgres_changes", { event:"*", schema:"public", table:"orders" }, refreshSoon)
-      .on("postgres_changes", { event:"*", schema:"public", table:"crm_tasks" }, refreshSoon)
-      .subscribe((status) => setLiveSync(status === "SUBSCRIBED" ? "live" : status === "CHANNEL_ERROR" ? "fallback" : "connecting"));
-    const fallback = setInterval(() => loadOrders(), 45000);
-    return () => { clearTimeout(refreshTimer); clearInterval(fallback); supabase.removeChannel(channel); };
-  }, [session?.user?.id]);
+.crmBrand span {
+  color: #1672f3;
+}
 
-  async function getAccessToken() {
-    const { data: { session } } = await supabase.auth.getSession();
-    return session?.access_token || null;
-  }
-  async function invokeCrmFunction(functionName, body = {}) {
-    const token = await getAccessToken();
-    if (!token) throw new Error("Сессия закончилась. Войдите снова.");
-    const { data, error } = await supabase.functions.invoke(functionName, {
-      body, headers: { Authorization: `Bearer ${token}` },
-    });
-    if (error) { console.error(functionName, error); throw new Error("Ошибка соединения с CRM."); }
-    if (!data?.success) throw new Error(data?.error || "Ошибка CRM.");
-    return data;
-  }
-  async function loadOrders() {
-    setLoading(true);
-    setError("");
+.crmLoginSubtitle {
+  color: #8792a4;
+  margin-top: 3px;
+}
 
-    try {
-      // Критичные для первого экрана данные загружаем первыми.
-      // Как только заказы получены, CRM уже можно показывать пользователю.
-      const data = await invokeCrmFunction("crm-orders");
-      setEmployee(data.employee);
-      setOrders(data.orders || []);
+.crmLoginCard h1 {
+  margin: 30px 0 22px;
+  font-size: 26px;
+  color: #10203a;
+}
 
-      if (selectedOrder) {
-        const refreshed = (data.orders || []).find((o) => o.id === selectedOrder.id);
-        if (refreshed) {
-          setSelectedOrder(refreshed);
-          setEditingOrder({
-            final_price: refreshed.final_price ?? "",
-            manager_comment: refreshed.manager_comment ?? "",
-            scheduled_at: getDateTimeLocalValue(refreshed.scheduled_at),
-            priority: refreshed.priority || "normal",
-            lead_source: refreshed.lead_source || "unknown",
-            cancellation_reason: refreshed.cancellation_reason || "",
-          });
-        }
-      }
+.crmLoginCard label {
+  display: block;
+  color: #46546a;
+  font-size: 13px;
+  font-weight: 700;
+  margin-top: 16px;
+}
 
-      // Не держим весь интерфейс заблокированным, пока грузятся справочники,
-      // задачи и настройки уведомлений.
-      setLoading(false);
+.crmLoginCard input {
+  width: 100%;
+  margin-top: 7px;
+  border: 1px solid #dfe5ed;
+  border-radius: 12px;
+  padding: 13px 14px;
+  outline: none;
+  font: inherit;
+}
 
-      // Эти три запроса независимы — запускаем одновременно в фоне.
-      const [snapshotResult, tasksResult, notifyResult] = await Promise.allSettled([
-        invokeCrmFunction("crm-admin", { action: "snapshot" }),
-        invokeCrmFunction("crm-admin", { action: "tasks_snapshot" }),
-        invokeCrmFunction("crm-notify", { action: "get_settings" }),
-      ]);
+.crmLoginCard input:focus {
+  border-color: #1672f3;
+}
 
-      if (snapshotResult.status === "fulfilled") {
-        const extra = snapshotResult.value;
-        setAdminData({
-          services: extra.services || [],
-          inventory: extra.inventory || [],
-          employees: extra.employees || [],
-          economics: extra.economics || [],
-          payments: extra.payments || [], suppliers:extra.suppliers||[], receipts:extra.receipts||[], reservations:extra.reservations||[], payouts:extra.payouts||[],
-        });
-        if (extra.company_settings) {
-          setCompanySettings((current) => ({ ...current, ...extra.company_settings }));
-        }
-      } else {
-        console.error("crm-admin snapshot", snapshotResult.reason);
-      }
+.crmPrimaryButton {
+  width: 100%;
+  border: 0;
+  border-radius: 12px;
+  background: #1672f3;
+  color: white;
+  padding: 14px;
+  font-weight: 700;
+  margin-top: 24px;
+  cursor: pointer;
+}
 
-      if (tasksResult.status === "fulfilled") {
-        setCrmTasks(tasksResult.value.tasks || []);
-      } else {
-        console.error("crm tasks", tasksResult.reason);
-      }
+.crmError {
+  padding: 12px 14px;
+  border-radius: 10px;
+  background: #fff0f0;
+  color: #bd2c2c;
+  margin-top: 16px;
+  font-size: 13px;
+}
 
-      if (notifyResult.status === "fulfilled") {
-        if (notifyResult.value.settings) setNotificationSettings(notifyResult.value.settings);
-      } else {
-        console.error("crm-notify settings", notifyResult.reason);
-      }
-    } catch (err) {
-      console.error(err);
-      setError(err instanceof Error ? err.message : "Ошибка загрузки CRM.");
-      setLoading(false);
-    }
-  }
+.crm {
+  min-height: 100vh;
+  background: #f2f5f9;
+  color: #15233c;
+  display: flex;
+}
 
-  async function login(event) {
-    event.preventDefault(); setLoginLoading(true); setLoginError("");
-    try {
-      const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-      if (error) throw error;
-      setSession(data.session); await loadOrders();
-    } catch (err) { console.error(err); setLoginError("Неверный email или пароль."); }
-    finally { setLoginLoading(false); }
-  }
-  async function logout() {
-    await supabase.auth.signOut(); setSession(null); setEmployee(null); setOrders([]); setSelectedOrder(null);
-  }
-  function openOrder(order) {
-    setEditingOrder({
-      final_price: order.final_price ?? "",
-      manager_comment: order.manager_comment ?? "",
-      scheduled_at: getDateTimeLocalValue(order.scheduled_at),
-      priority: order.priority || "normal",
-      lead_source: order.lead_source || "unknown",
-      cancellation_reason: order.cancellation_reason || "",
-    });
-    setSaveMessage(""); setError(""); setSelectedOrder(order);
-    setOrderHistory([]);
-    invokeCrmFunction("crm-admin", { action:"history", order_id:order.id }).then((data)=>setOrderHistory(data.history||[])).catch(()=>setOrderHistory([]));
-    invokeCrmFunction("crm-admin", { action:"tasks_snapshot", order_id:order.id }).then((data)=>setOrderTasks(data.tasks||[])).catch(()=>setOrderTasks([]));
-    if (!order.viewed_at) invokeCrmFunction("crm-admin", { action:"mark_viewed", order_id:order.id }).then((data)=>{ setOrders((cur)=>cur.map((o)=>o.id===order.id?{...o,viewed_at:data.viewed_at}:o)); setSelectedOrder((cur)=>cur?{...cur,viewed_at:data.viewed_at}:cur); }).catch(console.error);
-    loadProduction(order.id);
-  }
-  function goToOrder(order) { setActivePage("orders"); openOrder(order); }
+.crmSidebar {
+  position: fixed;
+  inset: 0 auto 0 0;
+  width: 230px;
+  background: #101c31;
+  color: white;
+  padding: 25px 17px;
+  display: flex;
+  flex-direction: column;
+}
 
-  async function confirmRequestedBooking() {
-    if (!selectedOrder?.requested_at || savingOrder) return;
-    setSavingOrder(true); setSaveMessage(""); setError("");
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"schedule_booking", order_id:selectedOrder.id, scheduled_at:selectedOrder.requested_at, accept_requested:true });
-      const updated = { ...selectedOrder, ...(data.order || {}) };
-      setSelectedOrder(updated);
-      setOrders((current)=>current.map((o)=>o.id===updated.id?{...o,...(data.order||{})}:o));
-      setEditingOrder((current)=>({...current,scheduled_at:getDateTimeLocalValue(updated.scheduled_at)}));
-      setSaveMessage("Желаемое время клиента принято. Запись подтверждена.");
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось назначить время."); }
-    finally { setSavingOrder(false); }
-  }
+.crmSidebarBrand {
+  color: white;
+  padding-left: 10px;
+}
 
-  async function proposeBookingTime() {
-    if (!selectedOrder || savingOrder) return;
-    if (!editingOrder.scheduled_at) { setError("Выберите дату и время записи."); return; }
-    setSavingOrder(true); setSaveMessage(""); setError("");
-    try {
-      const date = new Date(editingOrder.scheduled_at);
-      if (Number.isNaN(date.getTime())) throw new Error("Проверьте дату и время записи.");
-      const scheduledAt = date.toISOString();
-      if (scheduledAt === selectedOrder.scheduled_at && selectedOrder.booking_status === "scheduled") {
-        setSaveMessage("Это время уже предложено клиенту.");
-        return;
-      }
-      const data = await invokeCrmFunction("crm-admin", { action:"schedule_booking", order_id:selectedOrder.id, scheduled_at:scheduledAt, accept_requested:false });
-      const updated = { ...selectedOrder, ...(data.order || {}) };
-      setSelectedOrder(updated);
-      setOrders((current)=>current.map((o)=>o.id===updated.id?{...o,...(data.order||{})}:o));
-      setEditingOrder((current)=>({...current,scheduled_at:getDateTimeLocalValue(updated.scheduled_at)}));
-      setSaveMessage("Новое время предложено клиенту. Ожидаем подтверждения.");
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось предложить время."); }
-    finally { setSavingOrder(false); }
-  }
+.crmSidebarSubtitle {
+  padding: 5px 10px 25px;
+  font-size: 10px;
+  letter-spacing: 1.4px;
+  color: #718099;
+}
 
-  async function cancelBooking() {
-    if (!selectedOrder || savingOrder) return;
-    if (!window.confirm("Отменить только запись на визит? Сам заказ останется в CRM.")) return;
-    setSavingOrder(true); setSaveMessage(""); setError("");
-    try {
-      const data=await invokeCrmFunction("crm-admin",{action:"cancel_booking",order_id:selectedOrder.id});
-      const updated={...selectedOrder,...(data.order||{})}; setSelectedOrder(updated); setOrders(cur=>cur.map(o=>o.id===updated.id?{...o,...(data.order||{})}:o));
-      setEditingOrder(cur=>({...cur,scheduled_at:""})); setSaveMessage("Запись отменена. Заказ сохранён.");
-    } catch(err){ setError(err instanceof Error?err.message:"Не удалось отменить запись"); } finally { setSavingOrder(false); }
-  }
+.crmMenu {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+}
 
-  async function acceptOrder() {
-    if (!selectedOrder) return;
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"accept_order", order_id:selectedOrder.id });
-      setSelectedOrder((cur)=>({...cur,...data.order}));
-      setOrders((cur)=>cur.map((o)=>o.id===selectedOrder.id?{...o,...data.order}:o));
-      await loadProduction(selectedOrder.id);
-      const h=await invokeCrmFunction("crm-admin",{action:"history",order_id:selectedOrder.id}); setOrderHistory(h.history||[]);
-      setSaveMessage("Заявка принята в работу");
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось принять заявку"); }
-  }
-  async function addCrmTask(event) {
-    event.preventDefault(); if(!selectedOrder||!taskDraft.title.trim()) return;
-    try {
-      await invokeCrmFunction("crm-admin", { action:"save_crm_task", order_id:selectedOrder.id, title:taskDraft.title.trim(), due_at:taskDraft.due_at?new Date(taskDraft.due_at).toISOString():null, assigned_employee_id:taskDraft.assigned_employee_id?Number(taskDraft.assigned_employee_id):employee?.id });
-      setTaskDraft({title:"",due_at:"",assigned_employee_id:""});
-      const d=await invokeCrmFunction("crm-admin",{action:"tasks_snapshot",order_id:selectedOrder.id}); setOrderTasks(d.tasks||[]);
-      const all=await invokeCrmFunction("crm-admin",{action:"tasks_snapshot"}); setCrmTasks(all.tasks||[]);
-    } catch(err){ setError(err instanceof Error?err.message:"Не удалось создать задачу"); }
-  }
-  async function toggleCrmTask(task) {
-    try { await invokeCrmFunction("crm-admin",{action:"toggle_crm_task",task_id:task.id,is_done:!task.is_done}); const d=await invokeCrmFunction("crm-admin",{action:"tasks_snapshot",order_id:task.order_id}); if(selectedOrder?.id===task.order_id)setOrderTasks(d.tasks||[]); const all=await invokeCrmFunction("crm-admin",{action:"tasks_snapshot"});setCrmTasks(all.tasks||[]); }
-    catch(err){setError(err instanceof Error?err.message:"Не удалось изменить задачу");}
-  }
-  async function saveEmployeeTelegram(emp) {
-    const value=prompt("Telegram chat ID сотрудника", emp.telegram_chat_id || ""); if(value===null)return;
-    try { await invokeCrmFunction("crm-admin",{action:"save_employee_telegram",employee_id:emp.id,telegram_chat_id:value}); await loadOrders(); }
-    catch(err){setError(err instanceof Error?err.message:"Не удалось сохранить Telegram chat ID");}
-  }
+.crmMenuItem {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: #8997ad;
+  padding: 11px 12px;
+  border-radius: 10px;
+  display: flex;
+  align-items: center;
+  gap: 11px;
+  cursor: pointer;
+  font: inherit;
+  text-align: left;
+}
 
-  async function saveEmployeeProfile(emp, patch) {
-    if (employee?.role !== "admin") return;
-    setSavingEmployeeId(emp.id); setError("");
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"save_employee_profile", employee_id:emp.id, ...patch });
-      setAdminData((cur)=>({ ...cur, employees:cur.employees.map((x)=>x.id===emp.id?{...x,...data.employee}:x) }));
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось изменить сотрудника"); }
-    finally { setSavingEmployeeId(null); }
-  }
+.crmMenuItemActive {
+  background: #1b3154;
+  color: white;
+}
 
-  async function notifyOrder(orderId, notificationType) {
-    try { await invokeCrmFunction("crm-notify", { action:"send", order_id:orderId, notification_type:notificationType }); }
-    catch (notifyError) { console.error("crm-notify", notifyError); }
-  }
-  async function loadProduction(orderId) {
-    setProductionLoading(true);
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"production_snapshot", order_id:orderId });
-      setProductionData({
-        tasks: data.tasks || [],
-        materials: data.materials || [],
-        photos: data.photos || [],
-        assigned_employee_id: data.assigned_employee_id || null,
-        labor_cost: Number(data.labor_cost || 0),
-      });
-      setLaborCostDraft(String(Number(data.labor_cost || 0)));
-      setMasterPayDraft(String(Number(data.master_pay || 0)));
-    } catch (err) {
-      console.error("production_snapshot", err);
-      setProductionData({ tasks: [], materials: [], photos: [], assigned_employee_id: null, labor_cost: 0, master_pay: 0 });
-      setLaborCostDraft("0");
-    } finally {
-      setProductionLoading(false);
-    }
-  }
+.crmSidebarBottom {
+  margin-top: auto;
+}
 
-  async function assignEmployee(employeeId) {
-    if (!selectedOrder) return;
-    try {
-      await invokeCrmFunction("crm-admin", { action:"assign_employee", order_id:selectedOrder.id, employee_id:employeeId ? Number(employeeId) : null });
-      setProductionData((c)=>({...c,assigned_employee_id:employeeId ? Number(employeeId) : null}));
-      setSaveMessage("Ответственный назначен");
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось назначить сотрудника"); }
-  }
+.crmEmployee {
+  display: flex;
+  gap: 10px;
+  align-items: center;
+  padding: 14px 8px;
+  border-top: 1px solid #26364f;
+}
 
-  async function addProductionTask(event) {
-    event.preventDefault();
-    if (!selectedOrder || !newTaskTitle.trim() || addingProductionTask) return;
-    setAddingProductionTask(true);
-    try {
-      await invokeCrmFunction("crm-admin", { action:"add_production_task", order_id:selectedOrder.id, title:newTaskTitle.trim(), assigned_employee_id:productionTaskDraft.assigned_employee_id?Number(productionTaskDraft.assigned_employee_id):null, due_at:productionTaskDraft.due_at?new Date(productionTaskDraft.due_at).toISOString():null });
-      setNewTaskTitle("");
-      setProductionTaskDraft({assigned_employee_id:"",due_at:""});
-      await loadProduction(selectedOrder.id);
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось добавить этап"); }
-    finally { setAddingProductionTask(false); }
-  }
+.crmAvatar {
+  width: 36px;
+  height: 36px;
+  border-radius: 10px;
+  background: #1d3356;
+  display: grid;
+  place-items: center;
+}
 
-  async function setProductionTaskStatus(task, status) {
-    if (!selectedOrder) return;
-    try {
-      await invokeCrmFunction("crm-admin", { action:"update_production_task", task_id:task.id, status });
-      await loadProduction(selectedOrder.id);
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось изменить этап"); }
-  }
+.crmEmployee strong,
+.crmEmployee span {
+  display: block;
+}
 
-  async function uploadProductionPhoto(event, kind) {
-    const file=event.target.files?.[0];
-    event.target.value="";
-    if(!file||!selectedOrder) return;
-    if(file.size>7*1024*1024){setError("Фото должно быть не больше 7 МБ");return;}
-    setUploadingProductionPhoto(true); setError("");
-    try {
-      const dataUrl=await new Promise((resolve,reject)=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.onerror=reject;r.readAsDataURL(file);});
-      await invokeCrmFunction("crm-admin", {action:"upload_production_photo",order_id:selectedOrder.id,kind,file_name:file.name,mime_type:file.type||"image/jpeg",data_url:dataUrl});
-      await loadProduction(selectedOrder.id);
-    } catch(err){setError(err instanceof Error?err.message:"Не удалось загрузить фото");}
-    finally{setUploadingProductionPhoto(false);}
-  }
+.crmEmployee strong {
+  font-size: 13px;
+}
 
-  async function addOrderMaterial(event) {
-    event.preventDefault();
-    if (!selectedOrder || !materialDraft.inventory_item_id || !materialDraft.quantity) return;
-    try {
-      await invokeCrmFunction("crm-admin", {
-        action:"add_order_material", order_id:selectedOrder.id,
-        inventory_item_id:Number(materialDraft.inventory_item_id), quantity:Number(materialDraft.quantity)
-      });
-      setMaterialDraft({ inventory_item_id:"", quantity:"" });
-      await loadProduction(selectedOrder.id);
-      const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
-      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[], payments:extra.payments||[],suppliers:extra.suppliers||[],receipts:extra.receipts||[],reservations:extra.reservations||[],payouts:extra.payouts||[] });
-      if (extra.company_settings) setCompanySettings((c)=>({...c,...extra.company_settings}));
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось списать материал"); }
-  }
+.crmEmployee span {
+  font-size: 11px;
+  color: #8290a5;
+  margin-top: 2px;
+}
 
-  async function saveOrderEconomics() {
-    if (!selectedOrder || savingEconomics) return;
-    const laborCost = Number(laborCostDraft || 0);
-    if (!Number.isFinite(laborCost) || laborCost < 0) { setError("Проверьте стоимость труда"); return; }
-    setSavingEconomics(true); setError("");
-    try {
-      await invokeCrmFunction("crm-admin", { action:"save_order_economics", order_id:selectedOrder.id, labor_cost:laborCost, master_pay:Number(masterPayDraft||0) });
-      setProductionData((c)=>({...c,labor_cost:laborCost}));
-      const extra = await invokeCrmFunction("crm-admin", { action:"snapshot" });
-      setAdminData({ services:extra.services||[], inventory:extra.inventory||[], employees:extra.employees||[], economics:extra.economics||[], payments:extra.payments||[],suppliers:extra.suppliers||[],receipts:extra.receipts||[],reservations:extra.reservations||[],payouts:extra.payouts||[] });
-      if (extra.company_settings) setCompanySettings((c)=>({...c,...extra.company_settings}));
-      const history = await invokeCrmFunction("crm-admin", { action:"history", order_id:selectedOrder.id });
-      setOrderHistory(history.history||[]);
-      setSaveMessage("Экономика заказа сохранена");
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось сохранить экономику заказа"); }
-    finally { setSavingEconomics(false); }
-  }
+.crmLogout {
+  border: 0;
+  background: transparent;
+  color: #8794a8;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 10px;
+  cursor: pointer;
+}
 
-  async function addPayment(event) {
-    event.preventDefault();
-    if (!selectedOrder) return;
-    const amount=Number(paymentDraft.amount||0);
-    if (!Number.isFinite(amount)||amount<=0) { setError("Укажите сумму платежа"); return; }
-    setSavingPayment(true); setError("");
-    try {
-      await invokeCrmFunction("crm-admin",{action:"add_payment",order_id:selectedOrder.id,amount,method:paymentDraft.method,note:paymentDraft.note});
-      setPaymentDraft({amount:"",method:"card",note:""});
-      const extra=await invokeCrmFunction("crm-admin",{action:"snapshot"});
-      setAdminData({services:extra.services||[],inventory:extra.inventory||[],employees:extra.employees||[],economics:extra.economics||[],payments:extra.payments||[],suppliers:extra.suppliers||[],receipts:extra.receipts||[],reservations:extra.reservations||[],payouts:extra.payouts||[]});
-      const h=await invokeCrmFunction("crm-admin",{action:"history",order_id:selectedOrder.id}); setOrderHistory(h.history||[]);
-      setSaveMessage("Платёж добавлен");
-    } catch(err){setError(err instanceof Error?err.message:"Не удалось добавить платёж");}
-    finally{setSavingPayment(false);}
-  }
+.crmMain {
+  margin-left: 230px;
+  width: calc(100% - 230px);
+  padding: 30px;
+  overflow-x: hidden;
+}
 
-  async function saveCompanySettings() {
-    setSavingCompanySettings(true); setError("");
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"save_company_settings", ...companySettings });
-      if (data.settings) setCompanySettings((c)=>({...c,...data.settings}));
-    } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить реквизиты"); }
-    finally { setSavingCompanySettings(false); }
-  }
+.crmTopbar {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
 
-  function escapeDocument(value) {
-    return String(value ?? "").replace(/[&<>"']/g, (char)=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#039;"}[char]));
-  }
+.crmTopbar h1 {
+  margin: 0;
+  font-size: 28px;
+}
 
-  function printOrderDocument(type) {
-    if (!selectedOrder) return;
-    const isQuote = type === "quote";
-    const title = isQuote ? "Коммерческое предложение" : "Заказ-наряд";
-    const items = selectedOrder.items || [];
-    const itemsTotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
-    const total = orderAmount(selectedOrder);
-    const adjustment = total - itemsTotal;
-    const rows = items.map((item, index)=>`<tr><td>${index+1}</td><td>${escapeDocument(item.service_name)}</td><td>${escapeDocument(item.material||"—")}</td><td>${Number(item.quantity||1)}</td><td>${formatPrice(item.price)}</td><td>${formatPrice(Number(item.price||0)*Number(item.quantity||1))}</td></tr>`).join("");
-    const logoUrl = `${window.location.origin}/furgon-club-logo.jpeg`;
-    const today = new Date().toLocaleDateString("ru-RU");
-    const customerName = escapeDocument(getCustomerName(selectedOrder.customer));
-    const customerPhone = escapeDocument(selectedOrder.customer?.phone || "");
-    const vehicleName = escapeDocument(getVehicleName(selectedOrder.vehicle));
-    const plate = escapeDocument(selectedOrder.vehicle?.license_plate || "");
-    const vin = escapeDocument(selectedOrder.vehicle?.vin || "");
-    const companyBlock = `${escapeDocument(companySettings.legal_name||"")}${companySettings.inn?`<br>ИНН ${escapeDocument(companySettings.inn)}`:""}${companySettings.kpp?` · КПП ${escapeDocument(companySettings.kpp)}`:""}${companySettings.address?`<br>${escapeDocument(companySettings.address)}`:""}`;
-    const contacts = `${escapeDocument(companySettings.phone||"")}${companySettings.email?`<br>${escapeDocument(companySettings.email)}`:""}`;
-    const adjustmentRow = adjustment !== 0 ? `<div class="summaryRow"><span>Корректировка согласованной стоимости</span><strong>${adjustment > 0 ? "+" : ""}${formatPrice(adjustment)}</strong></div>` : "";
+.crmTopbar p {
+  margin: 5px 0 0;
+  color: #8390a3;
+  font-size: 13px;
+}
 
-    const quoteBody = `
-      <div class="quoteHero"><div class="eyebrow">ПРЕДЛОЖЕНИЕ ДЛЯ КЛИЕНТА</div><h1>Коммерческое предложение</h1><p>№${selectedOrder.id} от ${today}</p></div>
-      <div class="quoteIntro">Предлагаем выполнить комплекс работ для вашего автомобиля. Ниже указаны выбранные работы, материалы и согласованная стоимость.</div>
-      <div class="infoGrid"><div class="infoCard"><span>КЛИЕНТ</span><strong>${customerName}</strong>${customerPhone?`<small>${customerPhone}</small>`:""}</div><div class="infoCard"><span>АВТОМОБИЛЬ</span><strong>${vehicleName}</strong><small>${plate?`Госномер: ${plate}`:""}${vin?`${plate?" · ":""}VIN: ${vin}`:""}</small></div></div>
-      <table><thead><tr><th>№</th><th>Работа</th><th>Материал</th><th>Кол.</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="summary quoteSummary"><div class="summaryRow"><span>Стоимость выбранных работ</span><strong>${formatPrice(itemsTotal)}</strong></div>${adjustmentRow}<div class="summaryTotal"><span>ИТОГО К ОПЛАТЕ</span><strong>${formatPrice(total)}</strong></div></div>
-      <div class="quoteTerms"><strong>Условия предложения</strong><p>Окончательный состав работ и сроки согласовываются с клиентом перед началом выполнения заказа.</p>${selectedOrder.manager_comment?`<p><b>Комментарий:</b> ${escapeDocument(selectedOrder.manager_comment)}</p>`:""}</div>`;
+.crmRefresh {
+  border: 1px solid #dfe5ed;
+  background: white;
+  border-radius: 10px;
+  padding: 10px 13px;
+  display: flex;
+  gap: 7px;
+  align-items: center;
+  cursor: pointer;
+}
 
-    const workBody = `
-      <div class="docTitle"><div><div class="eyebrow">РАБОЧИЙ ДОКУМЕНТ</div><h1>Заказ-наряд №${selectedOrder.id}</h1></div><div class="docDate">Дата: <strong>${today}</strong></div></div>
-      <div class="workInfo"><div><span>Заказчик</span><strong>${customerName}</strong>${customerPhone?`<small>${customerPhone}</small>`:""}</div><div><span>Автомобиль</span><strong>${vehicleName}</strong><small>${plate?`Госномер: ${plate}`:""}${vin?`<br>VIN: ${vin}`:""}</small></div></div>
-      ${selectedOrder.scheduled_at?`<div class="schedule"><span>Дата и время записи</span><strong>${escapeDocument(formatDate(selectedOrder.scheduled_at))}</strong></div>`:""}
-      <h2>Перечень работ</h2><table><thead><tr><th>№</th><th>Работа</th><th>Материал</th><th>Кол.</th><th>Цена</th><th>Сумма</th></tr></thead><tbody>${rows}</tbody></table>
-      <div class="summary"><div class="summaryRow"><span>Стоимость по позициям</span><strong>${formatPrice(itemsTotal)}</strong></div>${adjustmentRow}<div class="summaryTotal"><span>ИТОГО К ОПЛАТЕ</span><strong>${formatPrice(total)}</strong></div></div>
-      ${selectedOrder.manager_comment?`<div class="workComment"><strong>Комментарий к заказу</strong><p>${escapeDocument(selectedOrder.manager_comment)}</p></div>`:""}
-      <div class="acceptance"><strong>Приёмка работ</strong><p>Работы по заказ-наряду выполнены. Заказчик подтверждает получение автомобиля и результат выполненных работ.</p></div>
-      <div class="sign"><div><span>Исполнитель</span><b>________________ / ____________</b></div><div><span>Заказчик</span><b>________________ / ____________</b></div></div>`;
+.crmStats {
+  display: grid;
+  grid-template-columns:
+    repeat(4, minmax(150px, 1fr));
+  gap: 14px;
+  margin-top: 25px;
+}
 
-    const w = window.open("", "_blank", "width=1000,height=900");
-    if (!w) { setError("Браузер заблокировал окно документа. Разрешите всплывающие окна для CRM."); return; }
-    w.document.write(`<!doctype html><html lang="ru"><head><meta charset="UTF-8"><title>${title} №${selectedOrder.id}</title><style>
-      *{box-sizing:border-box}body{font-family:Arial,sans-serif;color:#111827;margin:0;background:#eef1f4;font-size:13px}.page{width:210mm;min-height:297mm;margin:20px auto;background:#fff;padding:17mm 16mm;box-shadow:0 8px 30px rgba(0,0,0,.12)}
-      .head{display:flex;justify-content:space-between;align-items:flex-start;gap:28px;padding-bottom:14px;border-bottom:3px solid #24d8cf}.logo{width:300px;max-height:108px;object-fit:contain;object-position:left center}.company{margin-top:8px;color:#4b5563;line-height:1.5}.contacts{text-align:right;color:#374151;line-height:1.55;padding-top:8px}.eyebrow{font-size:10px;font-weight:800;letter-spacing:1.6px;color:#0f9f99}.quoteHero{padding:28px 0 12px}.quoteHero h1{font-size:30px;margin:4px 0 5px}.quoteHero p{margin:0;color:#6b7280}.quoteIntro{padding:14px 16px;background:#effcfb;border-left:4px solid #24d8cf;border-radius:0 10px 10px 0;line-height:1.55;margin:8px 0 20px}.infoGrid,.workInfo{display:grid;grid-template-columns:1fr 1fr;gap:12px;margin:16px 0}.infoCard,.workInfo>div{border:1px solid #dfe5e9;border-radius:12px;padding:14px}.infoCard span,.workInfo span,.schedule span{display:block;color:#6b7280;font-size:10px;font-weight:800;letter-spacing:.8px;margin-bottom:6px}.infoCard strong,.workInfo strong{display:block;font-size:15px}.infoCard small,.workInfo small{display:block;color:#6b7280;margin-top:5px;line-height:1.45}.docTitle{display:flex;justify-content:space-between;align-items:flex-end;padding:25px 0 10px}.docTitle h1{font-size:27px;margin:4px 0 0}.docDate{color:#6b7280}.schedule{display:flex;justify-content:space-between;align-items:center;background:#f3f4f6;border-radius:10px;padding:12px 14px;margin:14px 0}.schedule span{margin:0}.schedule strong{font-size:14px}h2{font-size:16px;margin:22px 0 8px}table{width:100%;border-collapse:collapse;margin-top:14px}th,td{border-bottom:1px solid #dfe5e9;padding:10px 8px;text-align:left;vertical-align:top}th{background:#f5f7f8;font-size:11px;color:#4b5563}td:first-child,th:first-child{width:34px;text-align:center}.summary{width:360px;margin:18px 0 0 auto;border:1px solid #dfe5e9;border-radius:12px;overflow:hidden}.summaryRow,.summaryTotal{display:flex;justify-content:space-between;gap:20px;padding:10px 13px}.summaryRow{border-bottom:1px solid #e5e7eb;color:#4b5563}.summaryTotal{background:#111827;color:#fff;align-items:center}.quoteSummary .summaryTotal{background:#12aaa4}.summaryTotal span{font-size:11px;font-weight:800;letter-spacing:.5px}.summaryTotal strong{font-size:20px}.quoteTerms,.workComment,.acceptance{margin-top:24px;padding:14px 16px;border:1px solid #dfe5e9;border-radius:11px;line-height:1.5}.quoteTerms p,.workComment p,.acceptance p{margin:7px 0 0;color:#4b5563}.acceptance{margin-top:30px;background:#f8fafc}.sign{display:grid;grid-template-columns:1fr 1fr;gap:50px;margin-top:45px}.sign div{display:grid;gap:22px}.sign span{font-weight:700}.sign b{font-weight:400;color:#4b5563}.footer{margin-top:32px;padding-top:13px;border-top:1px solid #dfe5e9;color:#6b7280;white-space:pre-line;font-size:11px;line-height:1.5}
-      @media print{body{background:#fff}.page{margin:0;box-shadow:none;width:auto;min-height:auto;padding:12mm 12mm}@page{size:A4;margin:0}}
-    </style></head><body><div class="page"><div class="head"><div><img class="logo" src="${logoUrl}" alt="Furgon Club Garage"><div class="company">${companyBlock}</div></div><div class="contacts">${contacts}</div></div>${isQuote?quoteBody:workBody}<div class="footer">${escapeDocument(companySettings.bank_details||"")}\n${escapeDocument(companySettings.document_footer||"")}</div></div><script>window.onload=()=>setTimeout(()=>window.print(),500)<\/script></body></html>`);
-    w.document.close();
-  }
+.crmStat {
+  background: white;
+  border-radius: 15px;
+  padding: 18px;
+  box-shadow:
+    0 4px 18px
+    rgba(26, 44, 75, 0.04);
+}
 
-  async function imageToDataUrl(url) {
-    const response = await fetch(url);
-    if (!response.ok) throw new Error("Не удалось загрузить логотип.");
-    const blob = await response.blob();
-    return await new Promise((resolve, reject) => {
-      const reader = new FileReader();
-      reader.onload = () => resolve(reader.result);
-      reader.onerror = reject;
-      reader.readAsDataURL(blob);
-    });
-  }
+.crmStat span,
+.crmStat strong {
+  display: block;
+}
 
-  async function sendOrderDocumentToTelegram(type) {
-    if (!selectedOrder || sendingDocument) return;
-    const isQuote = type === "quote";
-    setSendingDocument(type); setError(""); setSaveMessage("");
-    try {
-      const pdfMakeModule = await import("pdfmake/build/pdfmake");
-      const pdfFontsModule = await import("pdfmake/build/vfs_fonts");
-      const pdfMake = pdfMakeModule.default || pdfMakeModule;
-      const pdfFonts = pdfFontsModule.default || pdfFontsModule;
-      if (pdfMake.addVirtualFileSystem) pdfMake.addVirtualFileSystem(pdfFonts);
-      else pdfMake.vfs = pdfFonts?.pdfMake?.vfs || pdfFonts?.vfs || pdfFonts;
+.crmStat span {
+  color: #8793a5;
+  font-size: 12px;
+}
 
-      const logo = await imageToDataUrl(`${window.location.origin}/furgon-club-logo.jpeg`);
-      const items = selectedOrder.items || [];
-      const itemsTotal = items.reduce((sum, item) => sum + Number(item.price || 0) * Number(item.quantity || 1), 0);
-      const total = orderAmount(selectedOrder);
-      const adjustment = total - itemsTotal;
-      const customerName = getCustomerName(selectedOrder.customer);
-      const vehicleName = getVehicleName(selectedOrder.vehicle);
-      const today = new Date().toLocaleDateString("ru-RU");
-      const tableBody = [["№","Работа","Материал","Кол.","Цена","Сумма"], ...items.map((item,index)=>[
-        String(index+1), String(item.service_name||""), String(item.material||"—"), String(item.quantity||1),
-        formatPrice(item.price), formatPrice(Number(item.price||0)*Number(item.quantity||1))
-      ])];
-      const summary = [
-        { columns:[{text:"Стоимость по позициям",color:"#4b5563"},{text:formatPrice(itemsTotal),bold:true,alignment:"right"}], margin:[0,5,0,0] },
-        ...(adjustment !== 0 ? [{ columns:[{text:"Корректировка согласованной стоимости",color:"#4b5563"},{text:`${adjustment>0?"+":""}${formatPrice(adjustment)}`,bold:true,alignment:"right"}], margin:[0,5,0,0] }] : []),
-        { columns:[{text:"ИТОГО К ОПЛАТЕ",bold:true},{text:formatPrice(total),bold:true,fontSize:16,alignment:"right"}], margin:[0,10,0,0] }
-      ];
-      const docDefinition = {
-        pageSize:"A4", pageMargins:[42,38,42,42], defaultStyle:{font:"Roboto",fontSize:10,color:"#111827"},
-        content:[
-          {columns:[{image:logo,width:190},{stack:[companySettings.phone||"",companySettings.email||""],alignment:"right",color:"#374151"}]},
-          {text:companySettings.legal_name||companySettings.company_name||"GarageFlow",margin:[0,8,0,0],bold:true},
-          {text:[companySettings.inn?`ИНН ${companySettings.inn}`:"",companySettings.address||""].filter(Boolean).join(" · "),color:"#4b5563",margin:[0,2,0,12]},
-          {canvas:[{type:"line",x1:0,y1:0,x2:510,y2:0,lineWidth:2,lineColor:"#24d8cf"}],margin:[0,0,0,18]},
-          {text:isQuote?"ПРЕДЛОЖЕНИЕ ДЛЯ КЛИЕНТА":"РАБОЧИЙ ДОКУМЕНТ",fontSize:8,bold:true,color:"#0f9f99",characterSpacing:1.2},
-          {text:isQuote?"Коммерческое предложение":`Заказ-наряд №${selectedOrder.id}`,fontSize:22,bold:true,margin:[0,3,0,3]},
-          {text:isQuote?`№${selectedOrder.id} от ${today}`:`Дата: ${today}`,color:"#6b7280",margin:[0,0,0,16]},
-          {table:{widths:["*","*"],body:[[
-            {stack:[{text:isQuote?"КЛИЕНТ":"ЗАКАЗЧИК",fontSize:8,bold:true,color:"#6b7280"},{text:customerName,bold:true,margin:[0,4,0,0]},{text:selectedOrder.customer?.phone||"",color:"#6b7280",fontSize:9}]},
-            {stack:[{text:"АВТОМОБИЛЬ",fontSize:8,bold:true,color:"#6b7280"},{text:vehicleName,bold:true,margin:[0,4,0,0]},{text:[selectedOrder.vehicle?.license_plate?`Госномер: ${selectedOrder.vehicle.license_plate}`:"",selectedOrder.vehicle?.vin?`VIN: ${selectedOrder.vehicle.vin}`:""].filter(Boolean).join(" · "),color:"#6b7280",fontSize:9}]}
-          ]]},layout:"lightHorizontalLines",margin:[0,0,0,16]},
-          ...(!isQuote && selectedOrder.scheduled_at ? [{text:`Дата и время записи: ${formatDate(selectedOrder.scheduled_at)}`,bold:true,margin:[0,0,0,12]}] : []),
-          {table:{headerRows:1,widths:[22,"*",95,30,58,62],body:tableBody},layout:"lightHorizontalLines"},
-          {stack:summary,margin:[150,12,0,0]},
-          ...(selectedOrder.manager_comment ? [{text:`Комментарий: ${selectedOrder.manager_comment}`,margin:[0,18,0,0]}] : []),
-          ...(isQuote ? [{text:"Условия предложения",bold:true,margin:[0,22,0,4]},{text:"Окончательный состав работ и сроки согласовываются с клиентом перед началом выполнения заказа.",color:"#4b5563"}] : [{text:"Приёмка работ",bold:true,margin:[0,24,0,4]},{text:"Работы по заказ-наряду выполнены. Заказчик подтверждает получение автомобиля и результат выполненных работ.",color:"#4b5563"},{columns:[{text:"Исполнитель: ____________________",margin:[0,35,0,0]},{text:"Заказчик: ____________________",margin:[20,35,0,0]}]}]),
-          {text:[companySettings.bank_details||"",companySettings.document_footer||""].filter(Boolean).join("\n"),fontSize:8,color:"#6b7280",margin:[0,28,0,0]}
-        ]
-      };
-      const pdfBase64 = await new Promise((resolve) => pdfMake.createPdf(docDefinition).getBase64(resolve));
-      const data = await invokeCrmFunction("crm-notify", { action:"send_document", order_id:selectedOrder.id, document_type:type, pdf_base64:pdfBase64 });
-      if (data.skipped) throw new Error(data.reason === "customer_has_no_telegram" ? "У клиента нет Telegram ID." : "Документ не отправлен.");
-      setSaveMessage(`${isQuote ? "Коммерческое предложение" : "Заказ-наряд"} отправлен клиенту в Telegram`);
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось отправить документ в Telegram."); }
-    finally { setSendingDocument(""); }
+.crmStat strong {
+  font-size: 25px;
+  margin-top: 8px;
+}
+
+.crmToolbar {
+  margin-top: 20px;
+}
+
+.crmSearch {
+  width: 370px;
+  max-width: 100%;
+  background: white;
+  border: 1px solid #e0e6ed;
+  border-radius: 11px;
+  padding: 0 12px;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.crmSearch input {
+  width: 100%;
+  border: 0;
+  outline: 0;
+  padding: 11px 0;
+  background: transparent;
+}
+
+.crmPageError {
+  margin: 18px 0;
+}
+
+.crmLoading {
+  margin-top: 30px;
+  background: white;
+  border-radius: 15px;
+  padding: 30px;
+}
+
+.crmBoard {
+  display: grid;
+  grid-template-columns:
+    repeat(5, minmax(230px, 1fr));
+  gap: 12px;
+  margin-top: 20px;
+  overflow-x: auto;
+  padding-bottom: 20px;
+}
+
+.crmColumn {
+  min-width: 230px;
+}
+
+.crmColumnHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 4px;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.crmColumnHeader strong {
+  min-width: 24px;
+  height: 24px;
+  border-radius: 8px;
+  background: #e4eaf2;
+  display: grid;
+  place-items: center;
+  font-size: 11px;
+}
+
+.crmColumnCards {
+  background: #e9edf3;
+  border-radius: 14px;
+  min-height: 420px;
+  padding: 9px;
+}
+
+.crmOrderCard {
+  background: white;
+  border-radius: 12px;
+  padding: 14px;
+  margin-bottom: 9px;
+  cursor: pointer;
+  box-shadow:
+    0 3px 12px
+    rgba(24, 40, 68, 0.05);
+}
+
+.crmOrderCard:hover {
+  transform: translateY(-1px);
+}
+
+.crmOrderTop {
+  display: flex;
+  justify-content: space-between;
+  color: #1672f3;
+  font-size: 11px;
+  font-weight: 800;
+}
+
+.crmOrderCard h3 {
+  margin: 9px 0 3px;
+  font-size: 15px;
+}
+
+.crmCustomerName {
+  margin: 0;
+  color: #69778d;
+  font-size: 12px;
+}
+
+.crmServices {
+  margin-top: 11px;
+  color: #8390a2;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.crmOrderBottom {
+  margin-top: 13px;
+  padding-top: 11px;
+  border-top: 1px solid #edf0f4;
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.crmOrderBottom strong {
+  font-size: 14px;
+}
+
+.crmOrderBottom span {
+  font-size: 9px;
+  color: #919cad;
+  text-align: right;
+}
+
+.crmEmptyColumn {
+  text-align: center;
+  color: #9ba5b3;
+  font-size: 12px;
+  padding: 30px 5px;
+}
+
+.crmModalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 100;
+  background: rgba(8, 17, 31, 0.5);
+  display: flex;
+  justify-content: flex-end;
+}
+
+.crmModal {
+  width: min(480px, 100%);
+  height: 100%;
+  overflow-y: auto;
+  background: white;
+  padding: 30px;
+  position: relative;
+  box-shadow:
+    -20px 0 50px
+    rgba(0, 0, 0, 0.12);
+}
+
+.crmModalClose {
+  position: absolute;
+  top: 20px;
+  right: 20px;
+  border: 0;
+  background: #eef2f6;
+  width: 38px;
+  height: 38px;
+  border-radius: 10px;
+  display: grid;
+  place-items: center;
+  cursor: pointer;
+}
+
+.crmOrderNumber {
+  color: #1672f3;
+  font-size: 11px;
+  font-weight: 800;
+  letter-spacing: 0.7px;
+}
+
+.crmModal h2 {
+  margin: 8px 50px 4px 0;
+  font-size: 24px;
+}
+
+.crmModalCustomer {
+  color: #7e8a9c;
+  margin: 0;
+}
+
+.crmModalSection {
+  margin-top: 27px;
+}
+
+.crmModalLabel {
+  display: block;
+  color: #8995a6;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  margin-bottom: 9px;
+}
+
+.crmStatusButtons {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.crmStatusButton {
+  border: 1px solid #dfe5ed;
+  background: white;
+  padding: 9px 11px;
+  border-radius: 9px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  font-size: 12px;
+}
+
+.crmStatusButtonActive {
+  background: #eaf3ff;
+  border-color: #1672f3;
+  color: #1265d7;
+}
+
+.crmModalItems {
+  border: 1px solid #e6eaf0;
+  border-radius: 12px;
+  overflow: hidden;
+}
+
+.crmModalItem {
+  padding: 12px;
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-bottom: 1px solid #edf0f4;
+}
+
+.crmModalItem:last-child {
+  border-bottom: 0;
+}
+
+.crmModalItem strong,
+.crmModalItem span {
+  display: block;
+}
+
+.crmModalItem span {
+  color: #8994a5;
+  font-size: 11px;
+  margin-top: 3px;
+}
+
+.crmModalTotal {
+  margin-top: 28px;
+  background: #f1f5fa;
+  border-radius: 14px;
+  padding: 17px;
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.crmModalTotal span {
+  color: #7f8b9d;
+}
+
+.crmModalTotal strong {
+  font-size: 22px;
+}
+
+.crmModalDate {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  color: #8a95a5;
+  font-size: 11px;
+  margin-top: 15px;
+}
+
+@media (max-width: 900px) {
+  .crmSidebar {
+    width: 72px;
   }
 
-  async function saveNotificationSettings() {
-    setSavingNotificationSettings(true); setError("");
-    try {
-      const data = await invokeCrmFunction("crm-notify", { action:"save_settings", settings:notificationSettings });
-      if (data.settings) setNotificationSettings(data.settings);
-    } catch (err) { setError(err instanceof Error ? err.message : "Не удалось сохранить уведомления"); }
-    finally { setSavingNotificationSettings(false); }
+  .crmSidebarBrand {
+    font-size: 0;
   }
 
-  async function changeStatus(order, status) {
-    if (changingStatus || order.status === status) return;
-    setChangingStatus(true); setError(""); setSaveMessage("");
-    try {
-      if (status === "done") {
-        const check = await invokeCrmFunction("crm-admin", { action:"completion_check", order_id:order.id });
-        if ((check.warnings || []).length) {
-          const warningText = check.warnings.map((x)=>`• ${x}`).join("\n");
-          if (employee?.role !== "admin") {
-            window.alert(`Заказ пока нельзя завершить:\n\n${warningText}\n\nУстраните замечания или обратитесь к администратору для принудительного завершения.`);
-            return;
-          }
-          const ok = window.confirm(`Заказ не полностью готов:\n\n${warningText}\n\nАдминистратор может завершить заказ принудительно. Продолжить?`);
-          if (!ok) return;
-        }
-      }
-      await invokeCrmFunction("crm-update-status", { order_id: order.id, status });
-      if (status === "done") {
-        try { await invokeCrmFunction("crm-admin", { action:"finalize_order_operations", order_id:order.id }); } catch(finalizeError) { console.error("finalize_order_operations", finalizeError); }
-      }
-      setOrders((current) => current.map((o) => o.id === order.id ? { ...o, status } : o));
-      if (selectedOrder?.id === order.id) setSelectedOrder((current) => ({ ...current, status }));
-      setSaveMessage("Статус изменён");
-      await notifyOrder(order.id, status === "done" ? "done" : "status_changed");
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось изменить статус."); }
-    finally { setChangingStatus(false); }
-  }
-  async function saveOrderChanges() {
-    if (!selectedOrder || savingOrder) return;
-    setSavingOrder(true); setSaveMessage(""); setError("");
-    try {
-      let scheduledAt = null;
-      if (editingOrder.scheduled_at) {
-        const date = new Date(editingOrder.scheduled_at);
-        if (Number.isNaN(date.getTime())) throw new Error("Проверьте дату и время записи.");
-        scheduledAt = date.toISOString();
-      }
-      const oldFinalPrice = selectedOrder.final_price;
-      const oldScheduledAt = selectedOrder.scheduled_at;
-      const data = await invokeCrmFunction("crm-update-order", {
-        order_id: selectedOrder.id,
-        final_price: editingOrder.final_price === "" ? null : Number(editingOrder.final_price),
-        manager_comment: editingOrder.manager_comment,
-        scheduled_at: scheduledAt,
-        priority: editingOrder.priority || "normal",
-      });
-      let bookingData = null;
-      if (scheduledAt && scheduledAt !== oldScheduledAt) {
-        bookingData = await invokeCrmFunction("crm-admin", { action:"schedule_booking", order_id:selectedOrder.id, scheduled_at:scheduledAt, accept_requested:false });
-      }
-      const salesData = await invokeCrmFunction("crm-admin", { action:"save_sales_meta", order_id:selectedOrder.id, lead_source:editingOrder.lead_source || "unknown", cancellation_reason:editingOrder.cancellation_reason || null });
-      const updated = { ...selectedOrder, ...data.order, ...(bookingData?.order || {}), ...(salesData.order || {}) };
-      setSelectedOrder(updated);
-      setOrders((current) => current.map((o) => o.id === updated.id ? { ...o, ...data.order } : o));
-      setEditingOrder({
-        final_price: updated.final_price ?? "",
-        manager_comment: updated.manager_comment ?? "",
-        scheduled_at: getDateTimeLocalValue(updated.scheduled_at),
-        priority: updated.priority || "normal",
-        lead_source: updated.lead_source || editingOrder.lead_source || "unknown",
-        cancellation_reason: updated.cancellation_reason || editingOrder.cancellation_reason || "",
-      });
-      setSaveMessage("Изменения сохранены");
-      if (String(oldFinalPrice ?? "") !== String(updated.final_price ?? "")) await notifyOrder(updated.id, "price_changed");
-      // schedule_booking already sends the appointment proposal; do not send a second schedule_changed Telegram notification here.
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось сохранить заказ."); }
-    finally { setSavingOrder(false); }
-  }
-  async function cancelOrder() {
-    if (!selectedOrder || savingOrder) return;
-    if (!window.confirm(`Отменить заказ №${selectedOrder.id}?`)) return;
-    setSavingOrder(true); setError(""); setSaveMessage("");
-    try {
-      if (!editingOrder.cancellation_reason) throw new Error("Выберите причину отказа перед отменой заказа.");
-      const salesData = await invokeCrmFunction("crm-admin", { action:"save_sales_meta", order_id:selectedOrder.id, lead_source:editingOrder.lead_source || "unknown", cancellation_reason:editingOrder.cancellation_reason });
-      const data = await invokeCrmFunction("crm-update-order", { order_id: selectedOrder.id, status: "cancelled" });
-      setOrders((current) => current.map((o) => o.id === selectedOrder.id ? { ...o, ...data.order } : o));
-      await notifyOrder(selectedOrder.id, "cancelled");
-      setSelectedOrder(null);
-    } catch (err) { console.error(err); setError(err instanceof Error ? err.message : "Не удалось отменить заказ."); }
-    finally { setSavingOrder(false); }
+  .crmSidebarBrand::after {
+    content: "GF";
+    font-size: 20px;
+    font-weight: 800;
   }
 
-  async function createManualOrder(event) {
-    event.preventDefault(); setSavingOrder(true); setError("");
-    try {
-      const data = await invokeCrmFunction("crm-admin", { action:"create_order", customer:{first_name:newOrder.first_name,last_name:newOrder.last_name,phone:newOrder.phone,username:newOrder.username}, vehicle:{brand:newOrder.brand,model:newOrder.model,year:newOrder.year,configuration:newOrder.configuration,license_plate:newOrder.license_plate,vin:newOrder.vin}, service_ids:newOrder.service_ids, priority:newOrder.priority, scheduled_at:newOrder.scheduled_at ? new Date(newOrder.scheduled_at).toISOString() : null, comment:newOrder.comment, lead_source:newOrder.lead_source||"phone" });
-      setShowCreateOrder(false); setNewOrder({ first_name:"", last_name:"", phone:"", username:"", brand:"", model:"", year:"", configuration:"", license_plate:"", vin:"", service_ids:[], priority:"normal", scheduled_at:"", comment:"", lead_source:"phone" }); await loadOrders(); setActivePage("orders");
-      alert(`Заказ №${data.order_id} создан`);
-    } catch(err){ setError(err instanceof Error?err.message:"Не удалось создать заказ"); } finally { setSavingOrder(false); }
-  }
-  async function saveInventory(event) {
-    event.preventDefault();
-    try { await invokeCrmFunction("crm-admin", { action:"save_inventory", ...inventoryForm }); setInventoryForm({name:"",unit:"шт",quantity:"",min_quantity:"",price:""}); await loadOrders(); }
-    catch(err){ setError(err instanceof Error?err.message:"Не удалось сохранить материал"); }
-  }
-  async function createSupplier(event){event.preventDefault();try{await invokeCrmFunction("crm-admin",{action:"save_supplier",...supplierForm});setSupplierForm({name:"",phone:"",email:"",note:""});await loadOrders();}catch(err){setError(err instanceof Error?err.message:"Не удалось сохранить поставщика");}}
-  async function addReceipt(event){event.preventDefault();try{await invokeCrmFunction("crm-admin",{action:"add_inventory_receipt",inventory_item_id:Number(receiptForm.inventory_item_id),supplier_id:receiptForm.supplier_id?Number(receiptForm.supplier_id):null,quantity:Number(receiptForm.quantity),unit_price:Number(receiptForm.unit_price),note:receiptForm.note});setReceiptForm({inventory_item_id:"",supplier_id:"",quantity:"",unit_price:"",note:""});await loadOrders();}catch(err){setError(err instanceof Error?err.message:"Не удалось оформить приход");}}
-  async function addPayout(event){event.preventDefault();try{await invokeCrmFunction("crm-admin",{action:"add_employee_payout",employee_id:Number(payoutDraft.employee_id),amount:Number(payoutDraft.amount),method:payoutDraft.method,note:payoutDraft.note});setPayoutDraft({employee_id:"",amount:"",method:"cash",note:""});await loadOrders();}catch(err){setError(err instanceof Error?err.message:"Не удалось добавить выплату");}}
-  async function payMasterBalance(employeeId, amount){
-    if(employee?.role!=="admin" || !employeeId || Number(amount)<=0) return;
-    const ok=window.confirm(`Выплатить мастеру ${formatPrice(Number(amount))}?`);
-    if(!ok) return;
-    try{
-      await invokeCrmFunction("crm-admin",{action:"add_employee_payout",employee_id:Number(employeeId),amount:Number(amount),method:"cash",note:"Полная выплата задолженности"});
-      await loadOrders();
-      setSaveMessage("Выплата мастеру добавлена");
-    }catch(err){setError(err instanceof Error?err.message:"Не удалось добавить выплату");}
-  }
-  async function reserveMaterial(orderId,itemId,quantity){try{await invokeCrmFunction("crm-admin",{action:"reserve_material",order_id:Number(orderId),inventory_item_id:Number(itemId),quantity:Number(quantity)});await loadOrders();if(selectedOrder?.id===orderId)await loadProduction(orderId);}catch(err){setError(err instanceof Error?err.message:"Не удалось зарезервировать материал");}}
-
-  function getServiceDraft(service) {
-    return serviceDrafts[service.id] || {
-      name: service.name || "",
-      description: service.description || "",
-      base_price: service.base_price ?? "",
-      is_active: service.is_active !== false,
-    };
-  }
-  function updateServiceDraft(service, field, value) {
-    setServiceDrafts((current) => ({
-      ...current,
-      [service.id]: { ...getServiceDraft(service), ...current[service.id], [field]: value },
-    }));
-  }
-  async function saveService(service) {
-    const draft = getServiceDraft(service);
-    setSavingServiceId(service.id); setError("");
-    try {
-      await invokeCrmFunction("crm-admin", { action:"save_service", id:service.id, ...draft, base_price:Number(draft.base_price || 0) });
-      setServiceDrafts((current) => { const next={...current}; delete next[service.id]; return next; });
-      await loadOrders();
-    } catch(err) { setError(err instanceof Error ? err.message : "Не удалось сохранить услугу"); }
-    finally { setSavingServiceId(null); }
-  }
-  async function createService(event) {
-    event.preventDefault(); setSavingServiceId("new"); setError("");
-    try {
-      await invokeCrmFunction("crm-admin", { action:"save_service", ...newService, base_price:Number(newService.base_price || 0) });
-      setNewService({ name:"", description:"", base_price:"", is_active:true });
-      await loadOrders();
-    } catch(err) { setError(err instanceof Error ? err.message : "Не удалось добавить услугу"); }
-    finally { setSavingServiceId(null); }
+  .crmSidebarSubtitle,
+  .crmMenuItem {
+    font-size: 0;
   }
 
-  async function editCustomerQuick(customer) {
-    const first_name=prompt("Имя",customer.first_name||""); if(first_name===null)return;
-    const last_name=prompt("Фамилия",customer.last_name||""); if(last_name===null)return;
-    const phone=prompt("Телефон",customer.phone||""); if(phone===null)return;
-    const username=prompt("Telegram без @",customer.username||""); if(username===null)return;
-    try { await invokeCrmFunction("crm-admin",{action:"update_customer",id:customer.id,first_name,last_name,phone,username}); setSelectedCustomer(null); await loadOrders(); } catch(err){setError(err instanceof Error?err.message:"Ошибка клиента");}
-  }
-  async function editVehicleQuick(vehicle) {
-    const brand=prompt("Марка",vehicle.brand||""); if(brand===null)return; const model=prompt("Модель",vehicle.model||""); if(model===null)return;
-    const year=prompt("Год",vehicle.year||""); if(year===null)return; const configuration=prompt("Конфигурация",vehicle.configuration||""); if(configuration===null)return;
-    const license_plate=prompt("Госномер",vehicle.license_plate||""); if(license_plate===null)return; const vin=prompt("VIN",vehicle.vin||""); if(vin===null)return;
-    try { await invokeCrmFunction("crm-admin",{action:"update_vehicle",id:vehicle.id,brand,model,year,configuration,license_plate,vin}); setSelectedVehicle(null); await loadOrders(); } catch(err){setError(err instanceof Error?err.message:"Ошибка автомобиля");}
+  .crmMenuItem {
+    justify-content: center;
   }
 
-  const filteredOrders = useMemo(() => {
-    const q = search.trim().toLowerCase();
-    return orders.filter((order) => {
-      const matchesText = !q || [
-        order.id, getCustomerName(order.customer), order.customer?.phone,
-        getVehicleName(order.vehicle), order.vehicle?.license_plate,
-      ].filter(Boolean).join(" ").toLowerCase().includes(q);
-      const matchesStatus = statusFilter === "all" || order.status === statusFilter;
-      const matchesPriority = priorityFilter === "all" || (order.priority || "normal") === priorityFilter;
-      const matchesView = viewFilter === "all" || (viewFilter === "new" ? !order.viewed_at : viewFilter === "reschedule" ? order.booking_status === "reschedule_requested" : !!order.viewed_at);
-      return matchesText && matchesStatus && matchesPriority && matchesView;
-    });
-  }, [orders, search, statusFilter, priorityFilter, viewFilter]);
-
-  const customers = useMemo(() => {
-    const map = new Map();
-    orders.forEach((order) => {
-      const c = order.customer;
-      if (!c) return;
-      const key = c.id ?? `customer-${getCustomerName(c)}-${c.phone || ""}`;
-      const current = map.get(key) || { ...c, ordersCount: 0, total: 0, lastOrder: null, orders: [] };
-      current.ordersCount += 1;
-      if (order.status !== "cancelled") current.total += orderAmount(order);
-      current.orders.push(order);
-      if (!current.lastOrder || new Date(order.created_at) > new Date(current.lastOrder.created_at)) current.lastOrder = order;
-      map.set(key, current);
-    });
-    return [...map.values()].sort((a, b) => new Date(b.lastOrder?.created_at || 0) - new Date(a.lastOrder?.created_at || 0));
-  }, [orders]);
-
-  const vehicles = useMemo(() => {
-    const map = new Map();
-    orders.forEach((order) => {
-      const v = order.vehicle;
-      if (!v) return;
-      const key = v.id ?? `vehicle-${v.brand}-${v.model}-${v.license_plate || ""}`;
-      const current = map.get(key) || { ...v, customer: order.customer, ordersCount: 0, total: 0, lastOrder: null, orders: [] };
-      current.ordersCount += 1;
-      if (order.status !== "cancelled") current.total += orderAmount(order);
-      current.orders.push(order);
-      if (!current.lastOrder || new Date(order.created_at) > new Date(current.lastOrder.created_at)) current.lastOrder = order;
-      map.set(key, current);
-    });
-    return [...map.values()].sort((a, b) => new Date(b.lastOrder?.created_at || 0) - new Date(a.lastOrder?.created_at || 0));
-  }, [orders]);
-
-  const scheduledOrders = useMemo(() => orders
-    .filter((o) => o.scheduled_at && o.status !== "cancelled")
-    .sort((a, b) => new Date(a.scheduled_at) - new Date(b.scheduled_at)), [orders]);
-
-  const calendarGroups = useMemo(() => {
-    const groups = new Map();
-    scheduledOrders.forEach((order) => {
-      const d = new Date(order.scheduled_at);
-      const key = `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`;
-      if (!groups.has(key)) groups.set(key, []);
-      groups.get(key).push(order);
-    });
-    return [...groups.entries()];
-  }, [scheduledOrders]);
-
-  const totalRevenue = orders.filter((o) => o.status !== "cancelled").reduce((sum, o) => sum + orderAmount(o), 0);
-  const economicsByOrder = useMemo(() => new Map((adminData.economics || []).map((x)=>[Number(x.order_id), x])), [adminData.economics]);
-  const paymentsByOrder = useMemo(() => { const map=new Map(); (adminData.payments||[]).forEach((p)=>{const id=Number(p.order_id); const arr=map.get(id)||[]; arr.push(p); map.set(id,arr);}); return map; }, [adminData.payments]);
-  function getOrderPayments(order){ return paymentsByOrder.get(Number(order?.id))||[]; }
-  function getOrderEconomics(order) {
-    const saved = economicsByOrder.get(Number(order?.id)) || {};
-    const materialCost = Number(saved.material_cost || 0);
-    const laborCost = Number(saved.labor_cost || 0);
-    const revenue = orderAmount(order || {});
-    const cost = materialCost + laborCost;
-    const profit = revenue - cost;
-    const margin = revenue > 0 ? (profit / revenue) * 100 : 0;
-    const masterPay = Number(saved.master_pay || 0);
-    const paid = getOrderPayments(order).reduce((sum,p)=>sum+Number(p.amount||0),0);
-    const debt = Math.max(0,revenue-paid);
-    return { revenue, materialCost, laborCost, masterPay, cost, profit, margin, paid, debt };
+  .crmEmployee > div:last-child,
+  .crmLogout {
+    display: none;
   }
-  const businessEconomics = orders.filter((o)=>o.status!=="cancelled").reduce((acc,o)=>{ const e=getOrderEconomics(o); acc.materialCost+=e.materialCost; acc.laborCost+=e.laborCost; acc.masterPay+=e.masterPay; acc.cost+=e.cost; acc.profit+=e.profit; acc.paid+=e.paid; acc.debt+=e.debt; return acc; }, {materialCost:0,laborCost:0,masterPay:0,cost:0,profit:0,paid:0,debt:0});
-  const businessMargin = totalRevenue > 0 ? (businessEconomics.profit / totalRevenue) * 100 : 0;
-  const financePeriodStart = useMemo(() => {
-    const d = new Date();
-    if (financePeriod === "day") return new Date(d.getFullYear(), d.getMonth(), d.getDate());
-    if (financePeriod === "week") { const x=new Date(d.getFullYear(),d.getMonth(),d.getDate()); const day=(x.getDay()+6)%7; x.setDate(x.getDate()-day); return x; }
-    if (financePeriod === "year") return new Date(d.getFullYear(),0,1);
-    return new Date(d.getFullYear(),d.getMonth(),1);
-  }, [financePeriod]);
-  const periodPayments = useMemo(() => (adminData.payments||[]).filter((p)=>new Date(p.paid_at||p.created_at)>=financePeriodStart).sort((a,b)=>new Date(b.paid_at||b.created_at)-new Date(a.paid_at||a.created_at)), [adminData.payments, financePeriodStart]);
-  const periodOrders = useMemo(() => orders.filter((o)=>o.status!=="cancelled" && new Date(o.created_at)>=financePeriodStart), [orders, financePeriodStart]);
-  const periodPaid = periodPayments.reduce((s,p)=>s+Number(p.amount||0),0);
-  const periodRevenue = periodOrders.reduce((s,o)=>s+orderAmount(o),0);
-  const periodEconomics = periodOrders.reduce((a,o)=>{const e=getOrderEconomics(o);a.cost+=e.cost;a.profit+=e.profit;a.masterPay+=e.masterPay;return a;},{cost:0,profit:0,masterPay:0});
-  const paymentMethodStats = useMemo(()=>{const labels={cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"};const m=new Map();periodPayments.forEach(p=>m.set(p.method,(m.get(p.method)||0)+Number(p.amount||0)));return [...m.entries()].map(([key,value])=>({key,label:labels[key]||key,value})).sort((a,b)=>b.value-a.value);},[periodPayments]);
-  const debtOrders = useMemo(()=>orders.filter(o=>o.status!=="cancelled"&&getOrderEconomics(o).debt>0).sort((a,b)=>getOrderEconomics(b).debt-getOrderEconomics(a).debt),[orders,adminData.economics,adminData.payments]);
-  const masterFinance = useMemo(()=>(adminData.employees||[]).filter(m=>m.is_active&&m.role==="master").map(m=>{const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(m.id));const pay=own.reduce((s,o)=>s+getOrderEconomics(o).masterPay,0);const done=own.filter(o=>o.status==="done").length;return {master:m,orders:own.length,done,pay};}).sort((a,b)=>b.pay-a.pay),[adminData.employees,orders,adminData.economics]);
 
-  const activeOrders = orders.filter((o) => !["done", "cancelled"].includes(o.status)).length;
-  const rescheduleOrders = orders.filter((o) => o.booking_status === "reschedule_requested" && o.status !== "cancelled");
-  const unreadOrders = orders.filter((o) => !o.viewed_at && o.status !== "cancelled");
-  const staffPeriodStart=useMemo(()=>{const d=new Date();if(staffPeriod==="week"){const x=new Date(d.getFullYear(),d.getMonth(),d.getDate());x.setDate(x.getDate()-((x.getDay()+6)%7));return x;}if(staffPeriod==="year")return new Date(d.getFullYear(),0,1);return new Date(d.getFullYear(),d.getMonth(),1);},[staffPeriod]);
-  const staffRows=useMemo(()=>(adminData.employees||[]).filter(x=>x.role==="master").map(m=>{const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(m.id));const periodOwn=own.filter(o=>new Date(o.updated_at||o.created_at)>=staffPeriodStart);const done=periodOwn.filter(o=>o.status==="done").length;const accrued=periodOwn.reduce((sum,o)=>sum+Number((adminData.economics||[]).find(e=>Number(e.order_id)===Number(o.id))?.master_pay||o.master_pay||0),0);const paid=(adminData.payouts||[]).filter(p=>Number(p.employee_id)===Number(m.id)&&new Date(p.paid_at)>=staffPeriodStart).reduce((a,p)=>a+Number(p.amount||0),0);const tasks=(crmTasks||[]).filter(t=>Number(t.assigned_employee_id)===Number(m.id));return {master:m,orders:periodOwn.length,done,accrued,paid,due:Math.max(0,accrued-paid),openTasks:tasks.filter(t=>!t.is_done).length};}),[adminData.employees,adminData.economics,adminData.payouts,orders,crmTasks,staffPeriodStart]);
-  const reservedByItem=useMemo(()=>{const m=new Map();for(const r of adminData.reservations||[])m.set(Number(r.inventory_item_id),(m.get(Number(r.inventory_item_id))||0)+Number(r.quantity||0));return m;},[adminData.reservations]);
-  const purchaseList=useMemo(()=>(adminData.inventory||[]).map(i=>({...i,reserved:reservedByItem.get(Number(i.id))||0,available:Number(i.quantity||0)-(reservedByItem.get(Number(i.id))||0)})).filter(i=>i.available<=Number(i.min_quantity||0)),[adminData.inventory,reservedByItem]);
-  const activeMasters = adminData.employees.filter((x) => x.is_active && x.role === "master");
-  const SERVICE_BAYS_COUNT = 2;
-  const operationalAlerts = useMemo(() => {
-    const alerts = [];
-    orders.filter((o)=>o.booking_status === "reschedule_requested" && o.status !== "cancelled").forEach((o)=>alerts.push({key:`move-${o.id}`,kind:"move",title:`Клиент запросил перенос · заказ №${o.id}`,text:`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`,order:o}));
-    orders.filter((o)=>!o.viewed_at && o.status !== "cancelled").forEach((o)=>alerts.push({key:`new-${o.id}`,kind:"new",title:`Новая заявка · заказ №${o.id}`,text:`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`,order:o}));
-    crmTasks.filter((t)=>!t.is_done && t.due_at && new Date(t.due_at)<new Date()).forEach((t)=>{const o=orders.find((x)=>Number(x.id)===Number(t.order_id));alerts.push({key:`task-${t.id}`,kind:"task",title:`Просрочена задача · заказ №${t.order_id}`,text:t.title,order:o});});
-    debtOrders.filter((o)=>getOrderEconomics(o).debt>0).slice(0,5).forEach((o)=>alerts.push({key:`debt-${o.id}`,kind:"debt",title:`Долг клиента · заказ №${o.id}`,text:`${getCustomerName(o.customer)} · ${formatPrice(getOrderEconomics(o).debt)}`,order:o}));
-    purchaseList.slice(0,5).forEach((i)=>alerts.push({key:`stock-${i.id}`,kind:"stock",title:`Нужно заказать: ${i.name}`,text:`Доступно ${i.available} ${i.unit}, минимум ${i.min_quantity}`,page:"warehouse"}));
-    return alerts.slice(0,30);
-  }, [orders, crmTasks]);
-  const newOrders = orders.filter((o) => o.status === "new").length;
-  const doneOrders = orders.filter((o) => o.status === "done").length;
-  const upcoming = scheduledOrders.filter((o) => new Date(o.scheduled_at) >= new Date()).slice(0, 5);
-  const recent = [...orders].sort((a,b) => new Date(b.created_at) - new Date(a.created_at)).slice(0, 5);
-  const cancelledOrders = orders.filter((o) => o.status === "cancelled");
-  const nonCancelledOrders = orders.filter((o) => o.status !== "cancelled");
-  const averageCheck = nonCancelledOrders.length ? totalRevenue / nonCancelledOrders.length : 0;
-  const completionRate = nonCancelledOrders.length ? Math.round((doneOrders / nonCancelledOrders.length) * 100) : 0;
-  const urgentOrders = orders.filter((o) => o.status !== "cancelled" && o.priority === "urgent");
-  const highPriorityOrders = orders.filter((o) => o.status !== "cancelled" && o.priority === "high");
-  const now = new Date();
-  const todayStart = new Date(now.getFullYear(), now.getMonth(), now.getDate());
-  const todayEnd = new Date(todayStart); todayEnd.setDate(todayEnd.getDate() + 1);
-  const weekEnd = new Date(todayStart); weekEnd.setDate(weekEnd.getDate() + 7);
-  const todayOrders = scheduledOrders.filter((o) => { const d = new Date(o.scheduled_at); return d >= todayStart && d < todayEnd; });
-  const weekOrders = scheduledOrders.filter((o) => { const d = new Date(o.scheduled_at); return d >= todayStart && d < weekEnd; });
-  const overdueOrders = scheduledOrders.filter((o) => new Date(o.scheduled_at) < now && !["done", "cancelled"].includes(o.status));
-  const unseenOrders = orders.filter((o)=>!o.viewed_at && o.status!=="cancelled");
-  const openCrmTasks = crmTasks.filter((t)=>!t.is_done);
-  const overdueCrmTasks = openCrmTasks.filter((t)=>t.due_at && new Date(t.due_at)<now);
-  const todayCrmTasks = openCrmTasks.filter((t)=>{if(!t.due_at)return false;const d=new Date(t.due_at);return d>=todayStart&&d<todayEnd;});
-  const todayInWork = orders.filter((o)=>["production","installation"].includes(o.status));
-  const readyForDelivery = orders.filter((o)=>o.status==="done" && getOrderEconomics(o).debt>0);
-  const todayDone = orders.filter((o)=>o.status==="done" && new Date(o.updated_at||o.created_at)>=todayStart && new Date(o.updated_at||o.created_at)<todayEnd);
-  const todayPaid = (adminData.payments||[]).filter((p)=>{const d=new Date(p.paid_at||p.created_at);return d>=todayStart&&d<todayEnd;}).reduce((sum,p)=>sum+Number(p.amount||0),0);
-  const totalDebt = debtOrders.reduce((sum,o)=>sum+getOrderEconomics(o).debt,0);
-  const todayQueue = [...todayOrders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-  const serviceWorkload = useMemo(()=>activeMasters.map((m)=>{const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(m.id)&&!["done","cancelled"].includes(o.status));return {master:m,count:own.length};}).sort((a,b)=>b.count-a.count),[activeMasters,orders]);
-  const priorityCrmTasks = [...openCrmTasks].sort((a,b)=>{
-    const ad=a.due_at?new Date(a.due_at).getTime():Number.MAX_SAFE_INTEGER;
-    const bd=b.due_at?new Date(b.due_at).getTime():Number.MAX_SAFE_INTEGER;
-    return ad-bd;
-  }).slice(0,6);
-  const launchChecklist = [
-    { key:"company", label:"Название компании", done:Boolean(companySettings.company_name && companySettings.company_name !== "GarageFlow") },
-    { key:"contacts", label:"Телефон или email компании", done:Boolean(companySettings.phone || companySettings.email) },
-    { key:"services", label:"Каталог услуг", done:adminData.services.some((x)=>x.is_active!==false) },
-    { key:"manager", label:"Активный менеджер", done:adminData.employees.some((x)=>x.is_active && ["admin","manager"].includes(x.role)) },
-    { key:"master", label:"Активный мастер", done:adminData.employees.some((x)=>x.is_active && x.role==="master") },
-    { key:"telegram", label:"Telegram сотрудников", done:adminData.employees.filter((x)=>x.is_active).some((x)=>x.telegram_chat_id) },
-  ];
-  const launchReadyCount = launchChecklist.filter((x)=>x.done).length;
-
-  const sourceStats = useMemo(() => {
-    const map = new Map();
-    orders.forEach((o)=>{ const key=o.lead_source||"unknown"; const x=map.get(key)||{key,count:0,revenue:0,done:0}; x.count+=1; if(o.status!=="cancelled") x.revenue+=orderAmount(o); if(o.status==="done") x.done+=1; map.set(key,x); });
-    return [...map.values()].sort((a,b)=>b.count-a.count);
-  }, [orders]);
-  const cancellationStats = useMemo(() => {
-    const map=new Map(); cancelledOrders.forEach((o)=>{const key=o.cancellation_reason||"other";map.set(key,(map.get(key)||0)+1)}); return [...map.entries()].sort((a,b)=>b[1]-a[1]);
-  }, [orders]);
-  const overallConversion = orders.length ? Math.round((doneOrders/orders.length)*100) : 0;
-
-  const serviceStats = useMemo(() => {
-    const map = new Map();
-    nonCancelledOrders.forEach((order) => (order.items || []).forEach((item) => {
-      const key = item.service_name || "Без названия";
-      const current = map.get(key) || { name: key, count: 0, revenue: 0 };
-      current.count += Number(item.quantity || 1);
-      current.revenue += Number(item.price || 0) * Number(item.quantity || 1);
-      map.set(key, current);
-    }));
-    return [...map.values()].sort((a,b) => b.count - a.count).slice(0, 6);
-  }, [orders]);
-
-  const monthlyStats = useMemo(() => {
-    const result = [];
-    const base = new Date();
-    for (let offset = 5; offset >= 0; offset--) {
-      const d = new Date(base.getFullYear(), base.getMonth() - offset, 1);
-      const year = d.getFullYear(), month = d.getMonth();
-      const monthOrders = nonCancelledOrders.filter((o) => { const x = new Date(o.created_at); return x.getFullYear() === year && x.getMonth() === month; });
-      result.push({
-        key: `${year}-${month}`,
-        label: new Intl.DateTimeFormat("ru-RU", { month: "short" }).format(d),
-        orders: monthOrders.length,
-        revenue: monthOrders.reduce((sum,o) => sum + orderAmount(o), 0),
-        cost: monthOrders.reduce((sum,o) => sum + getOrderEconomics(o).cost, 0),
-        profit: monthOrders.reduce((sum,o) => sum + getOrderEconomics(o).profit, 0),
-      });
-    }
-    return result;
-  }, [orders]);
-  const maxMonthlyRevenue = Math.max(1, ...monthlyStats.map((m) => m.revenue));
-  const funnel = columns.map((column) => ({ ...column, count: orders.filter((o) => o.status === column.key).length }));
-  const maxFunnel = Math.max(1, ...funnel.map((item) => item.count));
-
-  const calendarDays = useMemo(() => {
-    const year = calendarMonth.getFullYear();
-    const month = calendarMonth.getMonth();
-    const first = new Date(year, month, 1);
-    const last = new Date(year, month + 1, 0);
-    const mondayOffset = (first.getDay() + 6) % 7;
-    const cells = [];
-    for (let i = 0; i < mondayOffset; i += 1) cells.push(null);
-    for (let day = 1; day <= last.getDate(); day += 1) {
-      const date = new Date(year, month, day);
-      const key = `${year}-${String(month + 1).padStart(2, "0")}-${String(day).padStart(2, "0")}`;
-      const dayOrders = scheduledOrders.filter((order) => {
-        const d = new Date(order.scheduled_at);
-        return d.getFullYear() === year && d.getMonth() === month && d.getDate() === day;
-      });
-      cells.push({ date, key, day, orders: dayOrders });
-    }
-    while (cells.length % 7 !== 0) cells.push(null);
-    return cells;
-  }, [calendarMonth, scheduledOrders]);
-
-  const monthTitle = new Intl.DateTimeFormat("ru-RU", { month: "long", year: "numeric" }).format(calendarMonth);
-  const calendarDateKey = (date) => `${date.getFullYear()}-${String(date.getMonth()+1).padStart(2,"0")}-${String(date.getDate()).padStart(2,"0")}`;
-  const weekStart = useMemo(() => { const d=new Date(calendarAnchor); const offset=(d.getDay()+6)%7; d.setHours(0,0,0,0); d.setDate(d.getDate()-offset); return d; }, [calendarAnchor]);
-  const weekDays = useMemo(() => Array.from({length:7},(_,i)=>{ const date=new Date(weekStart); date.setDate(date.getDate()+i); const key=calendarDateKey(date); return {date,key,orders:scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===key)}; }), [weekStart, scheduledOrders]);
-  const weekOperational = useMemo(() => weekDays.map((day) => {
-    const bookings = [...day.orders].sort((a,b)=>new Date(a.scheduled_at)-new Date(b.scheduled_at));
-    const lanes = Array.from({length:SERVICE_BAYS_COUNT},()=>[]);
-    const placed = [];
-    const conflictReasons = new Map();
-    const addConflict = (orderId, reason) => {
-      const current = conflictReasons.get(orderId) || [];
-      if (!current.includes(reason)) conflictReasons.set(orderId, [...current, reason]);
-    };
-    const overlaps = (aStart,aEnd,bStart,bEnd) => aStart < bEnd && aEnd > bStart;
-
-    bookings.forEach((o)=>{
-      const start = new Date(o.scheduled_at);
-      const duration = Math.max(30, Number(o.service_duration_minutes || 120));
-      const end = new Date(start.getTime()+duration*60000);
-      const preferred = Number(o.service_bay || 0);
-      const fits=(lane)=>lanes[lane].every((x)=>!overlaps(start,end,x.start,x.end));
-      let lane = -1;
-
-      if(preferred>=1 && preferred<=SERVICE_BAYS_COUNT){
-        lane=preferred-1;
-        const bayOverlaps = lanes[lane].filter((x)=>overlaps(start,end,x.start,x.end));
-        bayOverlaps.forEach((x)=>{
-          addConflict(o.id, `Пост ${preferred}: пересечение с заказом №${x.order.id}`);
-          addConflict(x.order.id, `Пост ${preferred}: пересечение с заказом №${o.id}`);
-        });
-      } else {
-        lane=lanes.findIndex((_,idx)=>fits(idx));
-        if(lane<0){
-          lane=0;
-          const bayOverlaps = lanes[lane].filter((x)=>overlaps(start,end,x.start,x.end));
-          addConflict(o.id, "Нет свободного рабочего поста на это время");
-          bayOverlaps.forEach((x)=>addConflict(x.order.id, `Пересечение по загрузке постов с заказом №${o.id}`));
-        }
-      }
-
-      const workStart = new Date(day.date); workStart.setHours(9,0,0,0);
-      const workEnd = new Date(day.date); workEnd.setHours(20,0,0,0);
-      const outsideHours = start < workStart || end > workEnd;
-      const item={order:o,start,end,lane,conflict:false,conflictReasons:[],outsideHours};
-      lanes[lane].push(item); placed.push(item);
-    });
-
-    // Один мастер не может физически вести два заказа одновременно.
-    for(let i=0;i<placed.length;i+=1){
-      const a=placed[i];
-      const aMaster=Number(a.order.assigned_employee_id||a.order.employee_id||0);
-      if(!aMaster) continue;
-      for(let j=i+1;j<placed.length;j+=1){
-        const b=placed[j];
-        const bMaster=Number(b.order.assigned_employee_id||b.order.employee_id||0);
-        if(aMaster===bMaster && overlaps(a.start,a.end,b.start,b.end)){
-          const masterName=activeMasters.find((m)=>Number(m.id)===aMaster)?.display_name || "Мастер";
-          addConflict(a.order.id, `${masterName}: одновременно назначен на заказ №${b.order.id}`);
-          addConflict(b.order.id, `${masterName}: одновременно назначен на заказ №${a.order.id}`);
-        }
-      }
-    }
-
-    placed.forEach((item)=>{
-      item.conflictReasons=conflictReasons.get(item.order.id)||[];
-      item.conflict=item.conflictReasons.length>0;
-    });
-    const conflicts=placed.filter((item)=>item.conflict);
-    let peak=0;
-    for(let h=9;h<20;h+=0.5){const t=new Date(day.date);t.setHours(Math.floor(h),h%1?30:0,0,0);peak=Math.max(peak,placed.filter((x)=>x.start<=t&&x.end>t).length);}
-    return {...day, bookings, lanes, placed, peak, conflicts};
-  }), [weekDays, activeMasters]);
-  const weekTitle = `${weekDays[0].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short"})} — ${weekDays[6].date.toLocaleDateString("ru-RU",{day:"numeric",month:"short",year:"numeric"})}`;
-  const todayKey = calendarDateKey(new Date());
-  const todayOperational = weekOperational.find((day)=>day.key===todayKey) || {bookings:[],lanes:Array.from({length:SERVICE_BAYS_COUNT},()=>[]),placed:[],conflicts:[],peak:0};
-  const todayScheduledInWork = todayOrders.filter((o)=>["production","installation"].includes(o.status)).length;
-  const todayReady = todayOrders.filter((o)=>o.status==="done").length;
-  const todayAssignedMinutes = todayOrders.reduce((sum,o)=>sum+Number(o.service_duration_minutes||120),0);
-  const todayCapacityMinutes = SERVICE_BAYS_COUNT * 11 * 60;
-  const todayLoadPercent = Math.min(999, Math.round((todayAssignedMinutes/Math.max(1,todayCapacityMinutes))*100));
-  const todayMasterLoad = activeMasters.map((master)=>{
-    const own=todayOrders.filter((o)=>Number(o.assigned_employee_id||o.employee_id||0)===Number(master.id));
-    return {master,orders:own,minutes:own.reduce((sum,o)=>sum+Number(o.service_duration_minutes||120),0)};
-  }).sort((a,b)=>b.minutes-a.minutes);
-  const unscheduledOrders = orders.filter((o)=>!o.scheduled_at && !["done","cancelled"].includes(o.status));
-  const selectedDayOrders = selectedCalendarDay
-    ? scheduledOrders.filter((o)=>calendarDateKey(new Date(o.scheduled_at))===selectedCalendarDay)
-    : [];
-  async function assignServiceBay(order, bay) {
-    if (employee?.role === "master") return;
-    try {
-      const { data, error: rpcError } = await supabase.rpc("garageflow_set_service_bay", { p_order_id: Number(order.id), p_service_bay: bay ? Number(bay) : null });
-      if (rpcError) throw rpcError;
-      const updatedBay = data?.service_bay ?? (bay ? Number(bay) : null);
-      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,service_bay:updatedBay}:o));
-      if(selectedOrder?.id===order.id) setSelectedOrder((current)=>current?{...current,service_bay:updatedBay}:current);
-      setSaveMessage(bay ? `Заказ назначен на пост ${bay}` : "Пост снят");
-    } catch(err) { setError(err?.message || "Не удалось назначить рабочий пост"); }
+  .crmMain {
+    margin-left: 72px;
+    width: calc(100% - 72px);
+    padding: 18px;
   }
-  async function setServiceDuration(order, minutes) {
-    if (employee?.role === "master") return;
-    try {
-      const value = Math.max(30, Number(minutes || 120));
-      const { data, error: rpcError } = await supabase.rpc("garageflow_set_service_duration", { p_order_id: Number(order.id), p_minutes: value });
-      if (rpcError) throw rpcError;
-      const updatedDuration = Number(data?.service_duration_minutes || value);
-      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,service_duration_minutes:updatedDuration}:o));
-      if(selectedOrder?.id===order.id) setSelectedOrder((current)=>current?{...current,service_duration_minutes:updatedDuration}:current);
-      setSaveMessage(`Длительность записи: ${updatedDuration} мин.`);
-    } catch(err) { setError(err?.message || "Не удалось изменить длительность записи"); }
+
+  .crmStats {
+    grid-template-columns:
+      repeat(2, 1fr);
   }
-  async function plannerAssignMaster(order, employeeId) {
-    if (employee?.role === "master") return;
-    setPlannerBusyOrderId(order.id); setError("");
-    try {
-      const value=employeeId?Number(employeeId):null;
-      await invokeCrmFunction("crm-admin", { action:"assign_employee", order_id:order.id, employee_id:value });
-      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,assigned_employee_id:value}:o));
-      if(selectedOrder?.id===order.id){setSelectedOrder((current)=>current?{...current,assigned_employee_id:value}:current);setProductionData((c)=>({...c,assigned_employee_id:value}));}
-      setSaveMessage(value?"Мастер назначен":"Мастер снят");
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось назначить мастера"); }
-    finally { setPlannerBusyOrderId(null); }
+}
+.crmEditInput,
+.crmEditTextarea {
+  width: 100%;
+  box-sizing: border-box;
+  border: 1px solid #dfe3ea;
+  border-radius: 10px;
+  background: #fff;
+  padding: 12px 14px;
+  font: inherit;
+  color: #17191d;
+  outline: none;
+}
+
+.crmEditInput:focus,
+.crmEditTextarea:focus {
+  border-color: #20242b;
+}
+
+.crmEditTextarea {
+  resize: vertical;
+  min-height: 100px;
+}
+
+.crmPriceInputWrap {
+  position: relative;
+}
+
+.crmPriceInputWrap input {
+  padding-right: 45px;
+}
+
+.crmPriceInputWrap > span {
+  position: absolute;
+  right: 15px;
+  top: 50%;
+  transform: translateY(-50%);
+  color: #747b86;
+  font-weight: 600;
+}
+
+.crmModalActions {
+  display: flex;
+  gap: 10px;
+  margin-top: 22px;
+}
+
+.crmSaveButton,
+.crmCancelButton {
+  border: 0;
+  border-radius: 10px;
+  padding: 13px 18px;
+  font: inherit;
+  font-weight: 700;
+  cursor: pointer;
+}
+
+.crmSaveButton {
+  flex: 1;
+  background: #181b20;
+  color: #fff;
+}
+
+.crmCancelButton {
+  background: #fff0f0;
+  color: #c52d2d;
+}
+
+.crmSaveButton:disabled,
+.crmCancelButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.crmSaveSuccess {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: 14px;
+  padding: 11px 13px;
+  border-radius: 9px;
+  background: #edf8f0;
+  color: #287a3e;
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 700px) {
+  .crmModalActions {
+    flex-direction: column;
   }
-  async function plannerShiftBooking(order, deltaMinutes) {
-    if (employee?.role === "master" || !order.scheduled_at) return;
-    setPlannerBusyOrderId(order.id); setError(""); setSaveMessage("");
-    try {
-      const next=new Date(new Date(order.scheduled_at).getTime()+Number(deltaMinutes)*60000);
-      const data=await invokeCrmFunction("crm-admin",{action:"schedule_booking",order_id:order.id,scheduled_at:next.toISOString(),accept_requested:false});
-      const updated={...order,...(data.order||{}),scheduled_at:data.order?.scheduled_at||next.toISOString()};
-      setOrders((current)=>current.map((o)=>o.id===order.id?{...o,...updated}:o));
-      if(selectedOrder?.id===order.id){setSelectedOrder((current)=>current?{...current,...updated}:current);setEditingOrder((current)=>({...current,scheduled_at:getDateTimeLocalValue(updated.scheduled_at)}));}
-      await notifyOrder(order.id,"schedule_changed");
-      setSaveMessage(`Заказ №${order.id}: время перенесено на ${formatDate(updated.scheduled_at)}. Ожидаем подтверждения клиента.`);
-    } catch(err) { setError(err instanceof Error?err.message:"Не удалось перенести запись"); }
-    finally { setPlannerBusyOrderId(null); }
+
+  .crmSaveButton,
+  .crmCancelButton {
+    width: 100%;
   }
-  function jumpCalendarToday(){ const d=new Date(); setCalendarAnchor(d); setCalendarMonth(new Date(d.getFullYear(),d.getMonth(),1)); setSelectedCalendarDay(calendarDateKey(d)); }
-  function moveCalendar(direction){ if(calendarView==="week") setCalendarAnchor((d)=>{const n=new Date(d);n.setDate(n.getDate()+direction*7);return n;}); else {setCalendarMonth((d)=>new Date(d.getFullYear(),d.getMonth()+direction,1));setSelectedCalendarDay(null);} }
-  const [pageTitle, pageSubtitle] = pageMeta[activePage] || pageMeta.overview;
+}
+/* ===== GarageFlow multi-page CRM ===== */
+.crmMenuItem small { margin-left: auto; font-size: 9px; opacity: .55; }
+.crmMenuItemDisabled { cursor: default; opacity: .55; }
+.crmStatsFive { grid-template-columns: repeat(5, minmax(140px, 1fr)); }
+.crmDashboardGrid { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; margin-top: 20px; }
+.crmPanel { background: #fff; border-radius: 16px; padding: 18px; box-shadow: 0 4px 18px rgba(26,44,75,.04); }
+.crmPanelHeader { display:flex; justify-content:space-between; align-items:flex-start; margin-bottom:10px; }
+.crmPanelHeader h2 { margin:0; font-size:17px; }
+.crmPanelHeader p { margin:4px 0 0; color:#8a96a8; font-size:12px; }
+.crmList { display:flex; flex-direction:column; }
+.crmListRow { width:100%; border:0; border-top:1px solid #edf0f4; background:transparent; padding:13px 2px; display:flex; align-items:center; gap:11px; text-align:left; cursor:pointer; color:inherit; }
+.crmListRow:first-child { border-top:0; }
+.crmListRow:hover { background:#f8fafc; }
+.crmListIcon { width:36px; height:36px; border-radius:10px; background:#eef4ff; color:#1672f3; display:grid; place-items:center; flex:0 0 auto; }
+.crmListMain { min-width:0; flex:1; }
+.crmListMain strong,.crmListMain span { display:block; }
+.crmListMain strong { font-size:13px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.crmListMain span { margin-top:3px; color:#8591a3; font-size:11px; }
+.crmEmptyState { padding:24px 8px; text-align:center; color:#919cad; font-size:12px; }
+.crmQuickGrid { display:grid; grid-template-columns:repeat(3,1fr); gap:14px; margin-top:16px; }
+.crmQuickGrid button { border:1px solid #e3e8ef; background:#fff; border-radius:14px; padding:16px; display:flex; align-items:center; gap:12px; text-align:left; cursor:pointer; color:#15233c; }
+.crmQuickGrid button:hover { border-color:#cbd8e9; transform:translateY(-1px); }
+.crmQuickGrid button div { flex:1; }
+.crmQuickGrid strong,.crmQuickGrid span { display:block; }
+.crmQuickGrid strong { font-size:13px; }
+.crmQuickGrid span { color:#8b96a7; font-size:11px; margin-top:3px; }
+.crmDataSection { margin-top:20px; }
+.crmDataSection .crmToolbar { margin-top:0; margin-bottom:16px; }
+.crmDataGrid { display:grid; grid-template-columns:repeat(3,minmax(230px,1fr)); gap:14px; }
+.crmDataCard { background:#fff; border-radius:15px; padding:17px; box-shadow:0 4px 18px rgba(26,44,75,.04); }
+.crmDataCardHead { display:flex; align-items:center; gap:11px; }
+.crmDataAvatar { width:42px; height:42px; border-radius:12px; display:grid; place-items:center; background:#edf4ff; color:#1672f3; }
+.crmDataCard h3 { margin:0; font-size:15px; }
+.crmDataCardHead span { display:block; color:#8b96a6; font-size:11px; margin-top:3px; }
+.crmDataInfo { display:flex; flex-direction:column; gap:8px; margin-top:16px; color:#68768a; font-size:12px; }
+.crmDataInfo div { display:flex; align-items:center; gap:7px; }
+.crmCardLink { width:100%; border:0; border-top:1px solid #edf0f4; background:transparent; margin-top:15px; padding:12px 0 0; display:flex; align-items:center; justify-content:space-between; color:#1672f3; cursor:pointer; font-weight:700; font-size:11px; }
+.crmCalendar { margin-top:22px; display:flex; flex-direction:column; gap:18px; }
+.crmCalendarDay { background:#fff; border-radius:16px; overflow:hidden; box-shadow:0 4px 18px rgba(26,44,75,.04); }
+.crmCalendarDate { display:flex; align-items:center; gap:9px; padding:15px 17px; background:#f7f9fc; text-transform:capitalize; }
+.crmCalendarDate strong { flex:1; font-size:13px; }
+.crmCalendarDate span { min-width:26px; height:26px; border-radius:8px; display:grid; place-items:center; background:#e5ebf3; font-size:11px; font-weight:800; }
+.crmCalendarRow { width:100%; border:0; border-top:1px solid #edf0f4; background:#fff; padding:14px 17px; display:flex; align-items:center; gap:14px; text-align:left; cursor:pointer; color:inherit; }
+.crmCalendarRow:hover { background:#fbfcfe; }
+.crmCalendarTime { width:48px; color:#1672f3; font-weight:800; font-size:13px; }
+.crmCalendarBody { flex:1; min-width:0; }
+.crmCalendarBody strong,.crmCalendarBody span { display:block; }
+.crmCalendarBody strong { font-size:13px; }
+.crmCalendarBody span { color:#8995a6; font-size:11px; margin-top:3px; }
+.crmCalendarStatus { background:#eef4ff; color:#1769d8; border-radius:8px; padding:7px 9px; font-size:10px; font-weight:700; }
+.crmEmptyLarge { background:#fff; border-radius:16px; padding:45px 20px; }
+.crmOrderSchedule { display:flex; align-items:center; gap:5px; margin-top:10px; color:#1672f3; font-size:10px; font-weight:700; }
 
-  if (checkingAuth) return <div className="crmLoginPage"><div className="crmLoginCard"><div className="crmBrand">Garage<span>Flow</span></div><p>Проверяем сессию...</p></div></div>;
-  if (!session) return (
-    <div className="crmLoginPage"><form className="crmLoginCard" onSubmit={login}>
-      <div className="crmBrand">Garage<span>Flow</span></div><div className="crmLoginSubtitle">CRM для сотрудников</div>
-      <h1>Вход в систему</h1>
-      <label>Email<input type="email" value={email} onChange={(e)=>setEmail(e.target.value)} placeholder="manager@company.ru" required /></label>
-      <label>Пароль<input type="password" value={password} onChange={(e)=>setPassword(e.target.value)} placeholder="••••••••" required /></label>
-      {loginError && <div className="crmError">{loginError}</div>}
-      <button className="crmPrimaryButton" type="submit" disabled={loginLoading}>{loginLoading ? "Входим..." : "Войти"}</button>
-    </form></div>
-  );
+@media (max-width: 1200px) {
+  .crmStatsFive { grid-template-columns:repeat(3,1fr); }
+  .crmDataGrid { grid-template-columns:repeat(2,minmax(230px,1fr)); }
+}
+@media (max-width: 900px) {
+  .crmDashboardGrid { grid-template-columns:1fr; }
+  .crmQuickGrid { grid-template-columns:1fr; }
+  .crmDataGrid { grid-template-columns:1fr; }
+  .crmMenuItem small { display:none; }
+}
+@media (max-width: 700px) {
+  .crmStatsFive { grid-template-columns:repeat(2,1fr); }
+  .crmCalendarStatus { display:none; }
+  .crmCalendarRow { gap:9px; padding:12px; }
+  .crmCalendarTime { width:42px; }
+}
 
-  const allMenu = [
-    ["overview", LayoutDashboard, "Обзор"], ["orders", ClipboardList, "Заказы"],
-    ["customers", Users, "Клиенты"], ["vehicles", Car, "Автомобили"], ["calendar", CalendarDays, "Календарь"],
-    ["analytics", BarChart3, "Аналитика"], ["finance", WalletCards, "Финансы"], ["staff", UserCog, "Персонал"], ["warehouse", Package, "Склад"], ["settings", Settings, "Настройки"],
-  ];
-  const rolePages = {
-    admin: new Set(allMenu.map(([key])=>key)),
-    manager: new Set(["overview","orders","customers","vehicles","calendar","analytics","finance","staff","warehouse","profile"]),
-    master: new Set(["overview","orders","calendar","warehouse","profile"]),
-  };
-  const menu = allMenu.filter(([key]) => (rolePages[employee?.role] || rolePages.master).has(key));
+/* GarageFlow CRM — expanded customer, vehicle, calendar and funnel views */
+.crmFunnelPanel,
+.crmCancelledPanel,
+.crmDayAgenda {
+  margin-top: 18px;
+  background: #fff;
+  border-radius: 16px;
+  padding: 20px;
+  box-shadow: 0 4px 18px rgba(26, 44, 75, 0.04);
+}
+.crmFunnel { display: grid; grid-template-columns: repeat(5, 1fr); gap: 16px; margin-top: 18px; }
+.crmFunnelTop { display: flex; justify-content: space-between; gap: 10px; font-size: 12px; color: #718096; }
+.crmFunnelTop strong { color: #17233a; font-size: 16px; }
+.crmFunnelTrack { height: 8px; border-radius: 99px; background: #edf1f6; overflow: hidden; margin-top: 9px; }
+.crmFunnelFill { height: 100%; border-radius: inherit; background: #1672f3; }
+.crmToolbarSplit { display: flex; align-items: center; justify-content: space-between; gap: 14px; }
+.crmFilterButton { border: 1px solid #dfe5ed; background: #fff; color: #66758a; border-radius: 10px; padding: 10px 12px; display: flex; align-items: center; gap: 8px; cursor: pointer; font: inherit; }
+.crmFilterButton span { min-width: 22px; height: 22px; display: grid; place-items: center; border-radius: 7px; background: #edf1f6; font-size: 11px; font-weight: 800; }
+.crmFilterButtonActive { border-color: #e2a7a7; background: #fff6f6; color: #b63b3b; }
+.crmCancelledPanel { max-width: 760px; }
+.crmDataCardButton { text-align: left; border: 0; font: inherit; color: inherit; cursor: pointer; width: 100%; }
+.crmDataCardButton:hover { transform: translateY(-2px); box-shadow: 0 8px 26px rgba(26,44,75,.09); }
+.crmEntityModal { width: min(560px, 100%); }
+.crmEntityFacts { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 10px; margin-top: 24px; }
+.crmEntityFacts > div { border: 1px solid #e6eaf0; border-radius: 12px; padding: 13px; display: grid; grid-template-columns: 24px 1fr; column-gap: 7px; align-items: center; }
+.crmEntityFacts svg { grid-row: 1 / 3; color: #1672f3; }
+.crmEntityFacts span { color: #8995a6; font-size: 10px; text-transform: uppercase; font-weight: 700; }
+.crmEntityFacts strong { font-size: 13px; overflow-wrap: anywhere; }
+.crmEntityRow { width: 100%; border: 0; border-bottom: 1px solid #edf0f4; background: #fff; padding: 13px; display: grid; grid-template-columns: 22px 1fr 18px; gap: 10px; align-items: center; text-align: left; color: #17233a; cursor: pointer; }
+.crmEntityRow:last-child { border-bottom: 0; }
+.crmEntityRow:hover { background: #f7f9fc; }
+.crmEntityRow > div strong, .crmEntityRow > div span { display: block; }
+.crmEntityRow > div span { margin-top: 3px; color: #8994a5; font-size: 11px; }
+.crmMonthSection { margin-top: 24px; }
+.crmMonthToolbar { display: flex; align-items: center; justify-content: center; gap: 18px; margin-bottom: 16px; }
+.crmMonthToolbar h2 { margin: 0; min-width: 220px; text-align: center; text-transform: capitalize; font-size: 20px; }
+.crmMonthToolbar button { width: 38px; height: 38px; border: 1px solid #dfe5ed; background: #fff; border-radius: 10px; display: grid; place-items: center; cursor: pointer; color: #40506a; }
+.crmWeekdays { display: grid; grid-template-columns: repeat(7, 1fr); gap: 8px; margin-bottom: 8px; }
+.crmWeekdays span { text-align: center; color: #8a96a8; font-size: 11px; font-weight: 800; text-transform: uppercase; }
+.crmMonthGrid { display: grid; grid-template-columns: repeat(7, minmax(105px, 1fr)); gap: 8px; }
+.crmMonthDay { min-height: 112px; border: 1px solid #e3e8ef; background: #fff; border-radius: 12px; padding: 10px; text-align: left; cursor: pointer; color: #17233a; overflow: hidden; }
+.crmMonthDay:hover { border-color: #b9c8dd; }
+.crmMonthDayBusy { background: #f8fbff; border-color: #d4e5fb; }
+.crmMonthDaySelected { outline: 2px solid #1672f3; border-color: #1672f3; }
+.crmMonthDayEmpty { background: transparent; border-color: transparent; cursor: default; }
+.crmMonthNumber { display: block; font-weight: 800; font-size: 13px; margin-bottom: 8px; }
+.crmMonthEvent { display: block; margin-top: 5px; padding: 5px 6px; border-radius: 7px; background: #eaf3ff; color: #1766cf; font-size: 9px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.crmMonthDay small { display: block; margin-top: 5px; color: #7d899a; font-size: 9px; }
+.crmDayAgenda { margin-top: 16px; }
+.crmDayAgenda .crmCalendarTime { min-width: 58px; font-weight: 800; color: #1672f3; }
+@media (max-width: 1100px) {
+  .crmFunnel { grid-template-columns: repeat(3, 1fr); }
+  .crmMonthGrid { grid-template-columns: repeat(7, minmax(85px, 1fr)); overflow-x: auto; }
+}
+@media (max-width: 700px) {
+  .crmFunnel { grid-template-columns: 1fr; }
+  .crmToolbarSplit { align-items: stretch; flex-direction: column; }
+  .crmFilterButton { justify-content: center; }
+  .crmEntityFacts { grid-template-columns: 1fr; }
+  .crmMonthSection { overflow-x: auto; }
+  .crmWeekdays, .crmMonthGrid { min-width: 720px; }
+}
 
-  return (
-    <div className="crm">
-      <aside className="crmSidebar">
-        <div className="crmBrand crmSidebarBrand">{companySettings.company_name || "GarageFlow"}</div>
-        <div className="crmSidebarSubtitle">SERVICE CRM</div>
-        <nav className="crmMenu">
-          {menu.map(([key, Icon, label]) => (
-            <button key={key} type="button" className={`crmMenuItem ${activePage === key ? "crmMenuItemActive" : ""}`} onClick={()=>{setActivePage(key); setSearch("");}}>
-              <Icon size={19}/>{label}{key==="orders"&&unseenOrders.length>0&&<span className="crmMenuBadge">{unseenOrders.length}</span>}
-            </button>
-          ))}
+/* GarageFlow v3: analytics, priority and attention */
+.crmAttentionGrid { display:grid; grid-template-columns:repeat(4,minmax(150px,1fr)); gap:12px; margin-top:16px; }
+.crmAttentionCard { border:1px solid #e3e8ef; background:#fff; border-radius:14px; padding:15px; display:flex; align-items:center; gap:12px; text-align:left; cursor:pointer; color:#68768b; }
+.crmAttentionCard div { display:flex; flex-direction:column; gap:4px; }
+.crmAttentionCard span { font-size:11px; }
+.crmAttentionCard strong { color:#15233c; font-size:15px; }
+.crmAttentionCardActive { border-color:#cfe0f7; background:#f7fbff; }
+.crmAttentionCardWarning { border-color:#f0c987; background:#fff9ed; }
+.crmAttentionCardUrgent { border-color:#efb0b0; background:#fff4f4; }
+.crmOrderFilters { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.crmOrderFilters select { border:1px solid #dfe5ed; background:#fff; border-radius:10px; padding:10px 12px; color:#46546a; font:inherit; outline:none; }
+.crmOrderTopRight { display:flex; align-items:center; gap:7px; }
+.crmPriorityBadge { padding:4px 7px; border-radius:999px; font-size:9px; font-weight:800; text-transform:uppercase; letter-spacing:.3px; }
+.crmPriority-high { background:#fff2d9; color:#a76a00; }
+.crmPriority-urgent { background:#ffe3e3; color:#c12c2c; }
+.crmPriorityChoices { display:grid; grid-template-columns:repeat(3,1fr); gap:8px; }
+.crmPriorityChoice { border:1px solid #dfe5ed; background:#fff; border-radius:10px; padding:10px; cursor:pointer; font:inherit; font-size:12px; font-weight:700; color:#5f6d82; }
+.crmPriorityChoiceActive { border-color:#1672f3; box-shadow:0 0 0 2px rgba(22,114,243,.08); }
+.crmPriorityChoice-high.crmPriorityChoiceActive { border-color:#d69a2d; background:#fff9ed; color:#9a6200; }
+.crmPriorityChoice-urgent.crmPriorityChoiceActive { border-color:#d64a4a; background:#fff1f1; color:#bd2c2c; }
+.crmCalendarSummary { display:grid; grid-template-columns:repeat(3,1fr); gap:12px; margin-bottom:16px; }
+.crmCalendarSummary > div { background:#fff; border:1px solid #e4e9f0; border-radius:13px; padding:14px 16px; display:flex; justify-content:space-between; align-items:center; }
+.crmCalendarSummary span { color:#8390a3; font-size:12px; }
+.crmCalendarSummary strong { font-size:20px; }
+.crmCalendarSummary .crmCalendarAlert { background:#fff6f0; border-color:#f1c2a5; }
+.crmAnalyticsGrid { display:grid; grid-template-columns:minmax(0,1.4fr) minmax(300px,.8fr); gap:16px; margin-top:16px; }
+.crmRevenueChart { height:280px; display:grid; grid-template-columns:repeat(6,1fr); gap:10px; align-items:end; padding-top:20px; }
+.crmRevenueColumn { height:100%; display:flex; flex-direction:column; align-items:center; justify-content:flex-end; gap:5px; min-width:0; }
+.crmRevenueValue { font-size:9px; color:#8491a3; white-space:nowrap; }
+.crmRevenueBarWrap { height:190px; width:100%; max-width:55px; background:#edf2f7; border-radius:9px; overflow:hidden; display:flex; align-items:flex-end; }
+.crmRevenueBar { width:100%; background:#1672f3; border-radius:9px 9px 0 0; min-height:3px; }
+.crmRevenueColumn strong { font-size:11px; text-transform:capitalize; }
+.crmRevenueColumn span { font-size:9px; color:#8a96a7; }
+.crmServiceStats { display:flex; flex-direction:column; gap:9px; }
+.crmServiceStat { display:flex; gap:11px; align-items:center; padding:11px; border:1px solid #e8edf3; border-radius:11px; }
+.crmServiceRank { width:28px; height:28px; border-radius:9px; background:#eef5ff; color:#1672f3; display:grid; place-items:center; font-weight:800; font-size:12px; }
+.crmServiceStat strong,.crmServiceStat span { display:block; }
+.crmServiceStat strong { font-size:13px; }
+.crmServiceStat span { color:#8793a5; font-size:10px; margin-top:3px; }
+.crmControlStats { display:grid; grid-template-columns:repeat(2,1fr); gap:10px; }
+.crmControlStats > div { border:1px solid #e7ebf1; border-radius:12px; padding:15px; }
+.crmControlStats span,.crmControlStats strong { display:block; }
+.crmControlStats span { color:#8793a5; font-size:11px; }
+.crmControlStats strong { margin-top:7px; font-size:22px; }
+@media (max-width:1100px) { .crmAttentionGrid { grid-template-columns:repeat(2,1fr); } .crmAnalyticsGrid { grid-template-columns:1fr; } }
+@media (max-width:700px) { .crmAttentionGrid,.crmCalendarSummary { grid-template-columns:1fr; } .crmPriorityChoices { grid-template-columns:1fr; } .crmRevenueChart { overflow-x:auto; } .crmOrderFilters { width:100%; } .crmOrderFilters select { flex:1; min-width:140px; } }
 
-        </nav>
-        <div className="crmSidebarBottom">
-          <div className="crmEmployee"><div className="crmAvatar"><UserRound size={19}/></div><div><strong>{employee?.display_name || "Сотрудник"}</strong><span>{roleLabels[employee?.role] || employee?.role}</span></div></div>
-          <button className="crmLogout" type="button" onClick={logout}><LogOut size={18}/>Выйти</button>
-        </div>
-      </aside>
+/* GarageFlow v4 */
+.crmCreateButton{border:0;background:#1672f3;color:#fff;border-radius:10px;padding:10px 14px;display:inline-flex;align-items:center;justify-content:center;gap:7px;font:inherit;font-weight:700;cursor:pointer}.crmCreateButton:disabled{opacity:.55;cursor:not-allowed}.crmCreateWide{width:100%;margin-top:24px;padding:14px}.crmV4Grid{display:grid;grid-template-columns:minmax(0,1.5fr) minmax(300px,.8fr);gap:18px;margin-top:24px}.crmV4Form label,.crmCreateOrderModal label{display:flex;flex-direction:column;gap:7px;color:#66748a;font-size:12px;font-weight:700;margin-top:12px}.crmV4Form input,.crmCreateOrderModal input,.crmCreateOrderModal select,.crmCreateOrderModal textarea{width:100%;box-sizing:border-box;border:1px solid #dfe5ed;border-radius:10px;padding:11px 12px;background:#fff;color:#15233c;font:inherit;outline:none}.crmFormRow{display:grid;grid-template-columns:1fr 1fr;gap:12px}.crmInventoryList,.crmSettingsList{display:flex;flex-direction:column;gap:8px;margin-top:14px}.crmInventoryRow,.crmSettingsRow{display:grid;grid-template-columns:minmax(0,1fr) auto auto;gap:18px;align-items:center;border:1px solid #e7ebf1;border-radius:12px;padding:13px;background:#fff}.crmInventoryRow>div:first-child strong,.crmInventoryRow>div:first-child span,.crmSettingsRow>div strong,.crmSettingsRow>div span{display:block}.crmInventoryRow span,.crmSettingsRow span{font-size:11px;color:#8793a5;margin-top:3px}.crmInventoryLow{border-color:#f0b8b8;background:#fff8f8}.crmSettingsRow{grid-template-columns:minmax(0,1fr) auto}.crmActiveDot{color:#2f8a4b!important;font-weight:700}.crmInactiveDot{color:#b84a4a!important;font-weight:700}.crmHint{color:#8793a5;font-size:12px;line-height:1.5;margin:18px 0 0}.crmInlineEdit{margin-top:14px;border:1px solid #dfe5ed;background:#fff;border-radius:9px;padding:9px 11px;display:flex;gap:7px;align-items:center;cursor:pointer;color:#46546a}.crmHistoryList{display:flex;flex-direction:column;gap:9px}.crmHistoryItem{display:flex;gap:10px;padding:11px;border-radius:10px;background:#f5f7fa}.crmHistoryItem svg{margin-top:2px;color:#1672f3;flex:none}.crmHistoryItem strong,.crmHistoryItem span{display:block}.crmHistoryItem strong{font-size:12px}.crmHistoryItem span{font-size:10px;color:#8a95a5;margin-top:3px}.crmCreateOrderModal{width:min(620px,100%)}.crmServicePicker{display:grid;grid-template-columns:1fr 1fr;gap:8px}.crmServicePicker label{margin:0;display:flex;flex-direction:row;align-items:center;border:1px solid #e2e7ee;border-radius:10px;padding:10px;cursor:pointer}.crmServicePicker input{width:auto}.crmServicePicker span{display:flex;justify-content:space-between;align-items:center;gap:10px;width:100%}.crmServicePicker small{color:#1672f3;font-weight:800}@media(max-width:900px){.crmV4Grid{grid-template-columns:1fr}}@media(max-width:700px){.crmFormRow,.crmServicePicker{grid-template-columns:1fr}.crmInventoryRow{grid-template-columns:1fr}.crmCreateButton{width:100%}}
 
-      <main className="crmMain">
-        <header className="crmTopbar"><div><h1>{pageTitle}</h1><p>{pageSubtitle}</p></div>
-          <div className="crmTopbarActions">
-            <button type="button" className="crmMobileProfileButton" onClick={()=>setActivePage("profile")}><UserRound size={18}/><span>{employee?.display_name || "Профиль"}</span></button>
-            <span className={`crmLiveState crmLiveState-${liveSync}`}>{liveSync === "live" ? "● Live" : liveSync === "fallback" ? "Авто 45с" : "Подключение…"}</span><button type="button" className="crmRefresh" onClick={loadOrders} disabled={loading}><RefreshCw size={18}/>Обновить</button>
-          </div>
-        </header>
-        {error && <div className="crmError crmPageError">{error}</div>}
-        {loading ? <div className="crmLoading">Загружаем данные...</div> : <>
 
-          {activePage === "profile" && <section className="crmMobileProfilePage">
-            <div className="crmPanel crmProfileCard">
-              <div className="crmProfileAvatar"><UserRound size={30}/></div>
-              <div className="crmProfileIdentity"><h2>{employee?.display_name || "Сотрудник"}</h2><p>{roleLabels[employee?.role] || employee?.role || "Сотрудник"}</p>{session?.user?.email && <span>{session.user.email}</span>}</div>
-            </div>
-            <button className="crmMobileLogoutButton" type="button" onClick={logout}><LogOut size={19}/>Выйти из аккаунта</button>
-            <p className="crmMobileLogoutHint">После выхода откроется экран входа, где можно войти под другим сотрудником.</p>
-          </section>}
+/* GarageFlow v4.1: editable services */
+.crmServiceEditorList{display:flex;flex-direction:column;gap:12px;margin-top:16px}.crmServiceEditor{border:1px solid #e3e8ef;border-radius:13px;padding:14px;background:#fff}.crmServiceEditorDisabled{background:#f8f9fb;opacity:.78}.crmServiceEditorFields{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(130px,.6fr);gap:10px}.crmServiceEditorFields label,.crmNewServiceForm label{display:flex;flex-direction:column;gap:6px;color:#66748a;font-size:11px;font-weight:700}.crmServiceEditorFields input,.crmNewServiceForm input{width:100%;box-sizing:border-box;border:1px solid #dfe5ed;border-radius:9px;padding:10px 11px;background:#fff;color:#15233c;font:inherit;outline:none}.crmServiceEditorFields input:focus,.crmNewServiceForm input:focus{border-color:#1672f3;box-shadow:0 0 0 2px rgba(22,114,243,.08)}.crmServiceDescription{grid-column:1/-1}.crmServiceEditorActions{display:flex;justify-content:space-between;align-items:center;gap:12px;margin-top:12px}.crmServiceToggle{display:flex!important;flex-direction:row!important;align-items:center;gap:8px!important;margin:0!important;cursor:pointer}.crmServiceToggle input{width:auto!important}.crmNewServiceForm{margin-top:18px;padding-top:18px;border-top:1px solid #e5eaf0}.crmNewServiceForm h3{margin:0;font-size:16px}.crmNewServiceForm p{margin:4px 0 12px;color:#8793a5;font-size:11px}.crmNewServiceForm>.crmCreateButton{margin-top:12px}@media(max-width:700px){.crmServiceEditorFields{grid-template-columns:1fr}.crmServiceDescription{grid-column:auto}.crmServiceEditorActions{align-items:stretch;flex-direction:column}.crmServiceEditorActions .crmCreateButton{width:100%}}
 
-          {activePage === "overview" && <>
-            <section className="crmV24WorkCenter">
-              <div className="crmPanelHeader"><div><h2>Рабочий центр</h2><p>Что происходит в сервисе прямо сейчас</p></div><Gauge size={21}/></div>
-              <div className="crmV24Flow">
-                <button type="button" onClick={()=>setActivePage("calendar")}><span>Записано сегодня</span><strong>{todayOrders.length}</strong><small>автомобилей</small></button>
-                <button type="button" onClick={()=>setActivePage("orders")}><span>Сейчас в работе</span><strong>{todayInWork.length}</strong><small>заказов</small></button>
-                <button type="button" onClick={()=>setActivePage("orders")}><span>Готово сегодня</span><strong>{todayDone.length}</strong><small>заказов</small></button>
-                {employee?.role !== "master" && <button type="button" onClick={()=>setActivePage("finance")}><span>Оплачено сегодня</span><strong>{formatPrice(todayPaid)}</strong><small>факт поступлений</small></button>}
-                {employee?.role !== "master" && <button type="button" className={totalDebt>0?"warn":""} onClick={()=>setActivePage("finance")}><span>Долги клиентов</span><strong>{formatPrice(totalDebt)}</strong><small>{debtOrders.length} заказов</small></button>}
-              </div>
-              <div className="crmV24CenterGrid">
-                <div className="crmV24Queue"><h3>Сегодня по времени</h3>{todayQueue.length?todayQueue.map(o=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><b>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</b><span><strong>{getVehicleName(o.vehicle)}</strong><small>№{o.id} · {getCustomerName(o.customer)} · {statusLabels[o.status]||o.status}</small></span><ChevronRight size={16}/></button>):<div className="crmEmptyState">На сегодня записей нет</div>}</div>
-                <div className="crmV24Queue"><h3>Загрузка мастеров</h3>{serviceWorkload.length?serviceWorkload.map(x=><div className="crmV24MasterLoad" key={x.master.id}><span><strong>{x.master.display_name}</strong><small>активных заказов</small></span><b>{x.count}</b></div>):<div className="crmEmptyState">Активных мастеров нет</div>}</div>
-              </div>
-            </section>
-            <section className="crmStats crmStatsFive">
-              <div className="crmStat"><span>Новые заявки</span><strong>{newOrders}</strong></div>
-              <div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div>
-              <div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>
-              {employee?.role !== "master" && <>
-                <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></button>
-                <div className="crmStat"><span>Себестоимость</span><strong>{formatPrice(businessEconomics.cost)}</strong></div>
-                <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Валовая прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></button>
-                <div className="crmStat"><span>Маржа</span><strong>{businessMargin.toFixed(1)}%</strong></div>
-              </>}
-            </section>
-            <section className="crmAttentionGrid">
-              <button type="button" className={`crmAttentionCard ${todayOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>setActivePage("calendar")}><CalendarCheck size={21}/><div><span>Сегодня</span><strong>{todayOrders.length} записей</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${weekOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>setActivePage("calendar")}><CalendarDays size={21}/><div><span>Ближайшие 7 дней</span><strong>{weekOrders.length} записей</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${overdueOrders.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>setActivePage("orders")}><AlertTriangle size={21}/><div><span>Требуют внимания</span><strong>{overdueOrders.length} просрочено</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${urgentOrders.length ? "crmAttentionCardUrgent" : ""}`} onClick={()=>{setActivePage("orders");setPriorityFilter("urgent");}}><TrendingUp size={21}/><div><span>Срочные</span><strong>{urgentOrders.length} заказов</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${unseenOrders.length ? "crmAttentionCardActive" : ""}`} onClick={()=>{setActivePage("orders");setViewFilter("new");}}><ClipboardList size={21}/><div><span>Новые заявки</span><strong>{unseenOrders.length} не просмотрено</strong></div></button><button type="button" className={`crmAttentionCard ${rescheduleOrders.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>{setActivePage("orders");setViewFilter("reschedule");}}><CalendarClock size={21}/><div><span>Запросы переноса</span><strong>{rescheduleOrders.length} требуют решения</strong></div></button>
-              <button type="button" className={`crmAttentionCard ${overdueCrmTasks.length ? "crmAttentionCardWarning" : ""}`} onClick={()=>setActivePage("orders")}><AlertTriangle size={21}/><div><span>Задачи</span><strong>{todayCrmTasks.length} сегодня · {overdueCrmTasks.length} просрочено</strong></div></button>
-            </section>
-            <section className="crmFunnelPanel">
-              <div className="crmPanelHeader"><div><h2>Воронка заказов</h2><p>Распределение по текущим статусам</p></div><BarChart3 size={20}/></div>
-              <div className="crmFunnel">{funnel.map((item)=><div className="crmFunnelItem" key={item.key}><div className="crmFunnelTop"><span>{item.label}</span><strong>{item.count}</strong></div><div className="crmFunnelTrack"><div className="crmFunnelFill" style={{width:`${Math.max(item.count ? 12 : 0, (item.count/maxFunnel)*100)}%`}}/></div></div>)}</div>
-            </section>
-            <section className="crmPanel crmV19Alerts">
-              <div className="crmPanelHeader"><div><h2>Центр уведомлений</h2><p>Новые заявки, переносы и просроченные задачи</p></div><div className="crmV19AlertCount"><Bell size={18}/><strong>{operationalAlerts.length}</strong></div></div>
-              <div className="crmV19AlertList">{operationalAlerts.length ? operationalAlerts.slice(0,6).map((alert)=><button type="button" key={alert.key} className={`crmV19Alert crmV19Alert-${alert.kind}`} onClick={()=>alert.order?goToOrder(alert.order):alert.page&&setActivePage(alert.page)}><span className="crmV19AlertIcon">{alert.kind==="move"?"↪":alert.kind==="task"?"!":"+"}</span><div><strong>{alert.title}</strong><small>{alert.text}</small></div><ChevronRight size={17}/></button>) : <div className="crmEmptyState">Новых уведомлений нет</div>}</div>
-            </section>
-            <section className="crmDashboardGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Ближайшие записи</h2><p>Назначенные работы</p></div><CalendarClock size={20}/></div>
-                <div className="crmList">{upcoming.length ? upcoming.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmListIcon"><CalendarDays size={18}/></div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatDate(o.scheduled_at)}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Ближайших записей пока нет</div>}</div>
-              </div>
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Последние заказы</h2><p>Недавняя активность</p></div><ClipboardList size={20}/></div>
-                <div className="crmList">{recent.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmListIcon"><Hash size={18}/></div><div className="crmListMain"><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{statusLabels[o.status] || o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={18}/></button>)}</div>
-              </div>
-            </section>
-            <section className="crmPanel crmMyTasksPanel">
-              <div className="crmPanelHeader"><div><h2>{employee?.role === "master" ? "Мои задачи" : "Задачи команды"}</h2><p>Ближайшие незавершённые задачи · просрочено {overdueCrmTasks.length}</p></div><CheckCircle2 size={20}/></div>
-              <div className="crmV15TaskList">{priorityCrmTasks.length ? priorityCrmTasks.map((task)=>{const order=orders.find((o)=>Number(o.id)===Number(task.order_id));const overdue=task.due_at&&new Date(task.due_at)<now;return <button type="button" key={task.id} className={`crmV15Task ${overdue?"crmV15TaskOverdue":""}`} onClick={()=>order&&goToOrder(order)}><span className="crmV15TaskCheck">○</span><div><strong>{task.title}</strong><small>Заказ №{task.order_id}{task.assignee?.display_name?` · ${task.assignee.display_name}`:""}{task.due_at?` · до ${formatDate(task.due_at)}`:""}</small></div><ChevronRight size={17}/></button>}) : <div className="crmEmptyState">Открытых задач нет</div>}</div>
-            </section>
-            <section className="crmQuickGrid">
-              <button onClick={()=>setActivePage("orders")}><Wrench size={21}/><div><strong>Открыть заказы</strong><span>Kanban и карточки работ</span></div><ArrowRight size={18}/></button>
-              {employee?.role !== "master" && <button onClick={()=>setActivePage("customers")}><Users size={21}/><div><strong>База клиентов</strong><span>{customers.length} клиентов</span></div><ArrowRight size={18}/></button>}
-              <button onClick={()=>setActivePage("calendar")}><CalendarClock size={21}/><div><strong>Календарь</strong><span>{scheduledOrders.length} записей</span></div><ArrowRight size={18}/></button>
-            </section>
-          </>}
 
-          {activePage === "orders" && <>
-            <section className="crmStats"><div className="crmStat"><span>{employee?.role === "master" ? "Мои заказы" : "Всего заказов"}</span><strong>{orders.length}</strong></div><div className="crmStat"><span>В работе</span><strong>{activeOrders}</strong></div><div className="crmStat"><span>Завершено</span><strong>{doneOrders}</strong></div>{employee?.role !== "master" && <div className="crmStat"><span>Сумма заказов</span><strong>{formatPrice(totalRevenue)}</strong></div>}</section>
-            <section className="crmToolbar crmToolbarSplit"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск по клиенту, автомобилю, номеру..."/></div><div className="crmOrderFilters"><select value={statusFilter} onChange={(e)=>setStatusFilter(e.target.value)}><option value="all">Все статусы</option>{columns.map((c)=><option key={c.key} value={c.key}>{c.label}</option>)}</select><select value={priorityFilter} onChange={(e)=>setPriorityFilter(e.target.value)}><option value="all">Все приоритеты</option><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select><select value={viewFilter} onChange={(e)=>setViewFilter(e.target.value)}><option value="all">Все заявки</option><option value="new">Непросмотренные</option><option value="viewed">Просмотренные</option></select>{employee?.role !== "master" && <><button className={`crmFilterButton ${showCancelled ? "crmFilterButtonActive" : ""}`} type="button" onClick={()=>setShowCancelled((value)=>!value)}>Отменённые <span>{cancelledOrders.length}</span><ChevronDown size={16}/></button><button className="crmCreateButton" type="button" onClick={()=>setShowCreateOrder(true)}><Plus size={17}/>Новый заказ</button></>}</div></section>
-            {showCancelled && <section className="crmCancelledPanel"><div className="crmPanelHeader"><div><h2>Отменённые заказы</h2><p>История отменённых заявок</p></div></div><div className="crmList">{cancelledOrders.length ? cancelledOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>openOrder(o)}><div className="crmListIcon"><Hash size={18}/></div><div className="crmListMain"><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">Отменённых заказов нет</div>}</div></section>}
-            <div className="crmMobileStatusTabs">{columns.map((column)=>{const count=filteredOrders.filter((o)=>o.status===column.key).length;return <button type="button" key={column.key} className={mobileOrderStatus===column.key?"active":""} onClick={()=>setMobileOrderStatus(column.key)}><span>{column.label}</span><b>{count}</b></button>})}</div>
-            <section className="crmBoard">{columns.map((column)=>{const columnOrders=filteredOrders.filter((o)=>o.status===column.key); return <div className={`crmColumn ${mobileOrderStatus===column.key?"crmMobileColumnActive":""}`} key={column.key}><div className="crmColumnHeader"><span>{column.label}</span><strong>{columnOrders.length}</strong></div><div className="crmColumnCards">{columnOrders.map((o)=><article key={o.id} className="crmOrderCard" onClick={()=>openOrder(o)}><div className="crmOrderTop"><span>Заказ №{o.id}{!o.viewed_at&&<b className="crmNewBadge">НОВАЯ</b>}{o.booking_status==="reschedule_requested"&&<b className="crmMoveBadge">↪ ПЕРЕНОС</b>}</span><div className="crmOrderTopRight">{o.priority && o.priority!=="normal" && <span className={`crmPriorityBadge crmPriority-${o.priority}`}>{o.priority==="urgent"?"Срочный":"Высокий"}</span>}<ChevronRight size={17}/></div></div><h3>{getVehicleName(o.vehicle)}</h3><p className="crmCustomerName">{getCustomerName(o.customer)}</p><div className="crmServices">{o.items?.map((i)=>i.service_name).join(" • ")}</div>{o.scheduled_at&&<div className="crmOrderSchedule"><Clock3 size={14}/>{formatDate(o.scheduled_at)}</div>}<div className="crmOrderBottom">{employee?.role !== "master" && <strong>{formatPrice(orderAmount(o))}</strong>}<span>{formatDate(o.created_at)}</span></div></article>)}{!columnOrders.length&&<div className="crmEmptyColumn">Нет заказов</div>}</div></div>})}</section>
-          </>}
+/* GarageFlow v6 — Telegram notifications */
+.crmNotifySettings{display:grid;gap:12px;margin:16px 0}.crmNotifySettings label{display:flex;gap:12px;align-items:flex-start;padding:14px;border:1px solid #e7ebf1;border-radius:14px;background:#fff;cursor:pointer}.crmNotifySettings input{width:18px;height:18px;margin-top:2px}.crmNotifySettings span{display:grid;gap:4px}.crmNotifySettings strong{font-size:14px;color:#13233d}.crmNotifySettings small{font-size:12px;line-height:1.45;color:#7b8799}
 
-          {activePage === "customers" && <section className="crmDataSection">
-            <div className="crmToolbar"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск клиента..."/></div></div>
-            <div className="crmDataGrid">{customers.filter((c)=>!search.trim() || [getCustomerName(c),c.phone,c.username].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase())).map((c)=><button className="crmDataCard crmDataCardButton" key={c.id ?? getCustomerName(c)} onClick={()=>setSelectedCustomer(c)}><div className="crmDataCardHead"><div className="crmDataAvatar"><UserRound size={20}/></div><div><h3>{getCustomerName(c)}</h3><span>{c.ordersCount} заказ(а)</span></div></div><div className="crmDataInfo">{c.phone&&<div><Phone size={15}/>{c.phone}</div>}{c.username&&<div><AtSign size={15}/>@{c.username}</div>}<div><CircleDollarSign size={15}/>{formatPrice(c.total)}</div></div><div className="crmCardLink">Открыть карточку клиента<ChevronRight size={16}/></div></button>)}</div>
-          </section>}
+/* GarageFlow v7 — production */
+.crmProductionSection { display: grid; gap: 12px; }
+.crmProductionAssignee { display: grid; gap: 6px; font-size: 13px; font-weight: 700; }
+.crmProductionAssignee select, .crmProductionAdd input, .crmMaterialAdd select, .crmMaterialAdd input { width: 100%; border: 1px solid #dfe3ea; border-radius: 10px; padding: 10px 12px; background: #fff; font: inherit; }
+.crmProductionTasks { display: grid; gap: 8px; }
+.crmProductionTask { display: flex; gap: 9px; align-items: center; width: 100%; border: 1px solid #e5e7eb; border-radius: 10px; padding: 10px 12px; background: #fff; text-align: left; cursor: pointer; }
+.crmProductionTaskDone { opacity: .65; }
+.crmProductionTaskDone strong { text-decoration: line-through; }
+.crmProductionAdd, .crmMaterialAdd { display: grid; grid-template-columns: 1fr auto; gap: 8px; }
+.crmProductionAdd button, .crmMaterialAdd button { border: 0; border-radius: 10px; padding: 10px 14px; background: #111827; color: #fff; font-weight: 800; cursor: pointer; }
+.crmMaterialAdd { grid-template-columns: minmax(0, 1fr) 120px auto; }
+.crmOrderMaterials { display: grid; gap: 8px; }
+.crmOrderMaterial { display: flex; justify-content: space-between; gap: 12px; align-items: center; padding: 10px 12px; border: 1px solid #e5e7eb; border-radius: 10px; }
+.crmOrderMaterial div { display: grid; gap: 3px; }
+.crmOrderMaterial span { font-size: 12px; color: #6b7280; }
+@media (max-width: 720px) { .crmMaterialAdd, .crmProductionAdd { grid-template-columns: 1fr; } }
 
-          {activePage === "vehicles" && <section className="crmDataSection">
-            <div className="crmToolbar"><div className="crmSearch"><Search size={18}/><input value={search} onChange={(e)=>setSearch(e.target.value)} placeholder="Поиск автомобиля или госномера..."/></div></div>
-            <div className="crmDataGrid">{vehicles.filter((v)=>!search.trim() || [getVehicleName(v),v.license_plate,v.vin,getCustomerName(v.customer)].filter(Boolean).join(" ").toLowerCase().includes(search.toLowerCase())).map((v)=><button className="crmDataCard crmDataCardButton" key={v.id ?? getVehicleName(v)} onClick={()=>setSelectedVehicle(v)}><div className="crmDataCardHead"><div className="crmDataAvatar"><Car size={20}/></div><div><h3>{getVehicleName(v)}</h3><span>{v.year || "Год не указан"}</span></div></div><div className="crmDataInfo"><div><UserRound size={15}/>{getCustomerName(v.customer)}</div>{v.license_plate&&<div><Hash size={15}/>{v.license_plate}</div>}<div><ClipboardList size={15}/>{v.ordersCount} заказ(а)</div><div><CircleDollarSign size={15}/>{formatPrice(v.total)}</div></div><div className="crmCardLink">Открыть карточку автомобиля<ChevronRight size={16}/></div></button>)}</div>
-          </section>}
 
-          {activePage === "calendar" && <section className="crmMonthSection crmCalendarV14">
-            <div className="crmCalendarSummary"><div><span>Сегодня</span><strong>{todayOrders.length}</strong></div><div><span>Ближайшие 7 дней</span><strong>{weekOrders.length}</strong></div><div><span>Без записи</span><strong>{unscheduledOrders.length}</strong></div><div className={overdueOrders.length?"crmCalendarAlert":""}><span>Просроченные</span><strong>{overdueOrders.length}</strong></div></div>
-            <div className="crmCalendarControlBar"><div className="crmCalendarViewSwitch"><button className={calendarView==="week"?"active":""} onClick={()=>setCalendarView("week")}>Неделя</button><button className={calendarView==="month"?"active":""} onClick={()=>setCalendarView("month")}>Месяц</button></div><button className="crmTodayButton" onClick={jumpCalendarToday}>Сегодня</button></div>
-            <div className="crmV19OpsSwitch"><button type="button" className={calendarOpsView==="today"?"active":""} onClick={()=>{setCalendarOpsView("today");jumpCalendarToday();}}><CalendarClock size={16}/> Сегодня</button><button type="button" className={calendarOpsView==="schedule"?"active":""} onClick={()=>setCalendarOpsView("schedule")}>Расписание</button><button type="button" className={calendarOpsView==="load"?"active":""} onClick={()=>setCalendarOpsView("load")}><Gauge size={16}/> Загрузка</button></div>
-            {calendarOpsView === "today" && <div className="crmV27Today">
-              <div className="crmV27TodayStats"><div><span>Запланировано</span><strong>{todayOrders.length}</strong><small>{todayAssignedMinutes} мин. работ</small></div><div><span>В работе</span><strong>{todayScheduledInWork}</strong><small>производство / установка</small></div><div><span>Готово</span><strong>{todayReady}</strong><small>за сегодня в плане</small></div><div className={todayOperational.conflicts.length?"danger":""}><span>Загрузка постов</span><strong>{todayLoadPercent}%</strong><small>{todayOperational.conflicts.length?`${todayOperational.conflicts.length} конфликт(а)`:"без пересечений"}</small></div></div>
-              <div className="crmV27DispatchGrid"><div className="crmPanel crmV27Dispatch"><div className="crmPanelHeader"><div><h2>Диспетчерская на сегодня</h2><p>09:00–20:00 · {SERVICE_BAYS_COUNT} рабочих поста</p></div><Gauge size={20}/></div>{Array.from({length:SERVICE_BAYS_COUNT},(_,bayIndex)=>{const lane=todayOperational.lanes[bayIndex]||[];return <div className="crmV27BayRow" key={bayIndex}><div className="crmV27BayTitle"><strong>Пост {bayIndex+1}</strong><span>{lane.reduce((sum,x)=>sum+Number(x.order.service_duration_minutes||120),0)} мин.</span></div><div className="crmV27BayJobs">{lane.length?lane.map((item)=><div className={`crmV27Job ${item.conflict?"conflict":""}`} key={item.order.id}><button type="button" className="crmV27JobMain" onClick={()=>goToOrder(item.order)}><time>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}–{item.end.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</time><strong>№{item.order.id} · {getVehicleName(item.order.vehicle)}</strong><span>{getCustomerName(item.order.customer)} · {statusLabels[item.order.status]||item.order.status}</span>{item.conflict&&<em className="crmV272JobWarning"><AlertTriangle size={13}/>{item.conflictReasons[0]}</em>}</button>{employee?.role!=="master"&&<div className="crmV27Quick"><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,-30)}>−30</button><button disabled={plannerBusyOrderId===item.order.id} onClick={()=>plannerShiftBooking(item.order,30)}>+30</button><select value={item.order.service_bay||""} onChange={(e)=>assignServiceBay(item.order,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select><select value={item.order.assigned_employee_id||""} disabled={plannerBusyOrderId===item.order.id} onChange={(e)=>plannerAssignMaster(item.order,e.target.value)}><option value="">Без мастера</option>{activeMasters.map((m)=><option value={m.id} key={m.id}>{m.display_name}</option>)}</select></div>}</div>):<div className="crmV27BayEmpty">Пост свободен</div>}</div></div>})}</div>
-              <div className="crmV27Side"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Мастера сегодня</h2><p>Плановая загрузка по заказам</p></div><Users size={20}/></div><div className="crmV27MasterList">{todayMasterLoad.map((row)=><div key={row.master.id}><span><strong>{row.master.display_name}</strong><small>{row.orders.length} заказ(а)</small></span><b>{Math.floor(row.minutes/60)}ч {row.minutes%60}м</b></div>)}{!todayMasterLoad.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Без записи</h2><p>Нужно назначить время</p></div><AlertTriangle size={20}/></div><div className="crmV27Unscheduled">{unscheduledOrders.slice(0,8).map((o)=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><span><strong>№{o.id} · {getVehicleName(o.vehicle)}</strong><small>{getCustomerName(o.customer)}</small></span><ChevronRight size={16}/></button>)}{!unscheduledOrders.length&&<div className="crmEmptyState">Все активные заказы запланированы</div>}</div></div></div></div>
-              {todayOperational.conflicts.length>0&&<div className="crmV27ConflictBanner"><AlertTriangle size={18}/><div><strong>Найдено конфликтов: {todayOperational.conflicts.length}</strong><span>Красным отмечены заказы с пересечением рабочего поста или занятости мастера. Измените пост, мастера или время.</span><div className="crmV272ConflictDetails">{todayOperational.conflicts.map((item)=><button type="button" key={item.order.id} onClick={()=>goToOrder(item.order)}><b>№{item.order.id}</b> · {item.conflictReasons.join(" · ")}</button>)}</div></div></div>}
-            </div>}
-            {calendarOpsView === "load" && <div className="crmV19Workload">
-              <div className="crmV19Capacity"><div><span>Рабочих постов</span><strong>{SERVICE_BAYS_COUNT}</strong></div><div><span>Активных мастеров</span><strong>{activeMasters.length}</strong></div><div><span>Записей на неделе</span><strong>{weekOperational.reduce((sum,d)=>sum+d.bookings.length,0)}</strong></div><div><span>Конфликтов</span><strong>{weekOperational.reduce((sum,d)=>sum+d.conflicts.length,0)}</strong></div></div>
-              <div className="crmV191Legend"><span><i/>Рабочее время 09:00–20:00</span><span><i className="busy"/>Запись</span><span><i className="danger"/>Пересечение</span><small>Длительность по умолчанию — 2 часа</small></div>
-              <div className="crmV191Timeline">{weekOperational.map((day)=><div className={`crmV191Day ${day.conflicts.length?"hasConflict":""}`} key={day.key}><div className="crmV19LoadHead"><div><strong>{day.date.toLocaleDateString("ru-RU",{weekday:"short",day:"numeric"})}</strong><span>{day.bookings.length} запис.</span></div><b className={day.conflicts.length?"danger":day.peak>=SERVICE_BAYS_COUNT?"busy":""}>{day.peak}/{SERVICE_BAYS_COUNT}</b></div><div className="crmV191Scale"><span>09</span><span>11</span><span>13</span><span>15</span><span>17</span><span>19</span><span>20</span></div>{day.lanes.map((lane,laneIndex)=><div className="crmV191Bay" key={laneIndex}><div className="crmV191BayName">Пост {laneIndex+1}</div><div className="crmV191Track">{lane.map((item)=>{const startMin=item.start.getHours()*60+item.start.getMinutes();const endMin=item.end.getHours()*60+item.end.getMinutes();const rawLeft=((startMin-540)/660)*100;const left=Math.max(0,Math.min(96,rawLeft));const visibleEnd=Math.min(1200,Math.max(540,endMin));const visibleStart=Math.min(1200,Math.max(540,startMin));const width=Math.max(4,Math.min(100-left,((visibleEnd-visibleStart)/660)*100));return <button type="button" title={`${getVehicleName(item.order.vehicle)} · ${item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})} · ${Number(item.order.service_duration_minutes||120)} мин.`} className={`crmV191Booking ${item.conflict?"conflict":""} ${item.outsideHours?"outside":""}`} style={{left:`${left}%`,width:`${width}%`}} key={item.order.id} onClick={()=>goToOrder(item.order)}><strong>{item.start.toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</strong><span>{getVehicleName(item.order.vehicle)}</span></button>})}</div></div>)}{day.bookings.length>0&&employee?.role!=="master"&&<div className="crmV191Assignments">{day.bookings.map((o)=><div className="crmV192Assignment" key={o.id}><button type="button" onClick={()=>goToOrder(o)}><strong>№{o.id} · {getVehicleName(o.vehicle)}</strong><small>{new Date(o.scheduled_at).toLocaleTimeString("ru-RU",{hour:"2-digit",minute:"2-digit"})}</small></button><label>Пост<select value={o.service_bay||""} onChange={(e)=>assignServiceBay(o,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option value={i+1} key={i+1}>Пост {i+1}</option>)}</select></label><label>Длительность<select value={Number(o.service_duration_minutes||120)} onChange={(e)=>setServiceDuration(o,e.target.value)}>{[30,60,90,120,180,240,360,480].map((m)=><option value={m} key={m}>{m<60?`${m} мин`:`${m/60} ч${m%60?"":""}`}</option>)}</select></label></div>)}</div>}{day.placed.some((x)=>x.outsideHours)&&<div className="crmV192Outside"><Clock3 size={15}/> Есть запись вне рабочего окна 09:00–20:00 или работа выходит за его пределы.</div>}{day.conflicts.length>0&&<div className="crmV19Conflict"><AlertTriangle size={15}/> Пересечение: {day.conflicts.length} {day.conflicts.length===1?"запись":"записи"}. Назначьте другой пост или время.</div>}</div>)}</div>
-              <div className="crmV19MasterLoad"><h3>Загрузка мастеров</h3><div>{activeMasters.map((master)=>{const tasks=crmTasks.filter((t)=>!t.is_done&&Number(t.assigned_employee_id)===Number(master.id));return <div className="crmV19MasterRow" key={master.id}><span><strong>{master.display_name}</strong><small>{tasks.length} открытых задач</small></span><b className={tasks.length>=5?"danger":tasks.length>=3?"busy":""}>{tasks.length}</b></div>})}{!activeMasters.length&&<div className="crmEmptyState">Активных мастеров нет</div>}</div></div>
-            </div>}
-            <div className="crmMonthToolbar"><button type="button" onClick={()=>moveCalendar(-1)}><ChevronLeft size={18}/></button><h2>{calendarView==="week"?weekTitle:monthTitle}</h2><button type="button" onClick={()=>moveCalendar(1)}><ChevronRight size={18}/></button></div>
-            {calendarView === "week" ? <div className="crmWeekPlanner">{weekDays.map((cell)=>{const isToday=cell.key===calendarDateKey(new Date());return <button type="button" key={cell.key} className={`crmWeekPlannerDay ${isToday?"crmWeekPlannerToday":""} ${selectedCalendarDay===cell.key?"crmWeekPlannerSelected":""}`} onClick={()=>setSelectedCalendarDay(cell.key)}><div className="crmWeekPlannerHead"><span>{cell.date.toLocaleDateString("ru-RU",{weekday:"short"})}</span><strong>{cell.date.getDate()}</strong>{cell.orders.length > 0 && <b>{cell.orders.length}</b>}</div><div className="crmWeekPlannerEvents">{cell.orders.length?cell.orders.map((o)=><div className={`crmWeekPlannerEvent crmBooking-${o.booking_status||"none"}`} key={o.id}><time>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</time><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)}</span><small>{o.booking_status==="confirmed"?"Запись подтверждена":o.booking_status==="scheduled"?"Ждём клиента":o.booking_status==="reschedule_requested"?"Перенос":statusLabels[o.status]||o.status}</small></div>):<div className="crmWeekPlannerEmpty">Свободно</div>}</div></button>})}</div> : <><div className="crmWeekdays">{["Пн","Вт","Ср","Чт","Пт","Сб","Вс"].map((day)=><span key={day}>{day}</span>)}</div><div className="crmMonthGrid">{calendarDays.map((cell,index)=>cell ? <button type="button" key={cell.key} className={`crmMonthDay ${cell.orders.length ? "crmMonthDayBusy" : ""} ${selectedCalendarDay===cell.key ? "crmMonthDaySelected" : ""}`} onClick={()=>setSelectedCalendarDay(cell.key)}><span className="crmMonthNumber">{cell.day}{cell.orders.length>0&&<b className={`crmLoadBadge ${cell.orders.length>=4?"crmLoadHigh":cell.orders.length>=2?"crmLoadMedium":""}`}>{cell.orders.length}</b>}</span>{cell.orders.slice(0,2).map((o)=><span className={`crmMonthEvent crmBooking-${o.booking_status||"none"}`} key={o.id}>{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))} · {getVehicleName(o.vehicle)}</span>)}{cell.orders.length>2&&<small>+ ещё {cell.orders.length-2}</small>}</button> : <div className="crmMonthDay crmMonthDayEmpty" key={`empty-${index}`}/>)}</div></>}
-            <div className="crmDayAgenda"><div className="crmPanelHeader"><div><h2>{selectedCalendarDay ? `План на ${new Date(`${selectedCalendarDay}T12:00:00`).toLocaleDateString("ru-RU")}` : "Выберите день"}</h2><p>{selectedCalendarDay ? `${selectedDayOrders.length} записей` : "Нажмите на день в календаре"}</p></div><CalendarClock size={20}/></div>{selectedCalendarDay && <div className="crmList">{selectedDayOrders.length ? selectedDayOrders.map((o)=><button className="crmListRow" key={o.id} onClick={()=>goToOrder(o)}><div className="crmCalendarTime">{new Intl.DateTimeFormat("ru-RU",{hour:"2-digit",minute:"2-digit"}).format(new Date(o.scheduled_at))}</div><div className="crmListMain"><strong>{getVehicleName(o.vehicle)}</strong><span>{getCustomerName(o.customer)} · Заказ №{o.id}</span></div><div className="crmCalendarStatus">{statusLabels[o.status]||o.status}</div><ChevronRight size={18}/></button>) : <div className="crmEmptyState">На этот день записей нет</div>}</div>}</div>
-          </section>}
+/* GarageFlow v8 — order economics */
+.crmEconomicsSection{display:grid;gap:14px}.crmEconomicsGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:9px}.crmEconomicsGrid>div{border:1px solid #e5e7eb;border-radius:11px;padding:11px;background:#f8fafc}.crmEconomicsGrid span,.crmEconomicsGrid strong{display:block}.crmEconomicsGrid span{font-size:11px;color:#7b8799}.crmEconomicsGrid strong{font-size:15px;margin-top:5px}.crmEconomicsPositive{background:#f1fbf4!important;border-color:#bfe4c8!important}.crmEconomicsPositive strong{color:#237a3b}.crmEconomicsNegative{background:#fff4f4!important;border-color:#efc0c0!important}.crmEconomicsNegative strong{color:#b83232}.crmLaborCostEditor{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:end}.crmLaborCostEditor label{display:grid;gap:6px;font-size:12px;font-weight:700;color:#66748a}.crmLaborCostEditor input{width:100%;box-sizing:border-box;border:1px solid #dfe3ea;border-radius:10px;padding:10px 12px;background:#fff;font:inherit}.crmLaborCostEditor button{border:0;border-radius:10px;padding:11px 14px;background:#111827;color:#fff;font-weight:800;cursor:pointer}.crmLaborCostEditor button:disabled{opacity:.55}.crmOrderMaterial small{display:block;font-size:10px;color:#7b8799;margin-top:3px}.crmStatsFive{grid-template-columns:repeat(auto-fit,minmax(150px,1fr))}@media(max-width:720px){.crmEconomicsGrid{grid-template-columns:repeat(2,1fr)}.crmLaborCostEditor{grid-template-columns:1fr}}
 
-          {activePage === "finance" && employee?.role !== "master" && <section className="crmDataSection crmV21FinancePage">
-            <div className="crmV21Period"><strong>Период</strong>{[["day","Сегодня"],["week","Неделя"],["month","Месяц"],["year","Год"]].map(([k,l])=><button type="button" key={k} className={financePeriod===k?"active":""} onClick={()=>setFinancePeriod(k)}>{l}</button>)}</div>
-            <section className="crmStats crmV21FinanceStats">
-              <div className="crmStat"><span>Продано работ</span><strong>{formatPrice(periodRevenue)}</strong></div>
-              <div className="crmStat"><span>Поступило в кассу</span><strong>{formatPrice(periodPaid)}</strong></div>
-              <button type="button" className="crmStat crmV21StatButton crmV21DebtStat" onClick={()=>document.getElementById("crm-v21-debts")?.scrollIntoView({behavior:"smooth"})}><span>Долги клиентов</span><strong>{formatPrice(businessEconomics.debt)}</strong></button>
-              <div className="crmStat"><span>Себестоимость</span><strong>{formatPrice(periodEconomics.cost)}</strong></div>
-              <div className="crmStat"><span>Валовая прибыль</span><strong>{formatPrice(periodEconomics.profit)}</strong></div>
-              <div className="crmStat"><span>Начислено мастерам</span><strong>{formatPrice(periodEconomics.masterPay)}</strong></div>
-            </section>
-            <div className="crmAnalyticsGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Касса</h2><p>Платежи за выбранный период</p></div><Banknote size={20}/></div><div className="crmV21MethodList">{paymentMethodStats.length?paymentMethodStats.map(x=><div key={x.key}><span>{x.label}</span><strong>{formatPrice(x.value)}</strong></div>):<div className="crmEmptyState">Платежей за период нет</div>}</div></div>
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Начисления мастерам</h2><p>По назначенным заказам</p></div><Users size={20}/></div><div className="crmV21MethodList">{masterFinance.length?masterFinance.map(x=><div key={x.master.id}><span><b>{x.master.display_name||`Мастер #${x.master.id}`}</b><small>{x.orders} заказ. · {x.done} готово</small></span><strong>{formatPrice(x.pay)}</strong></div>):<div className="crmEmptyState">Активных мастеров нет</div>}</div></div>
-            </div>
-            <div className="crmPanel crmV21Journal"><div className="crmPanelHeader"><div><h2>Журнал платежей</h2><p>{periodPayments.length} операций за период</p></div><WalletCards size={20}/></div><div className="crmV21Table">{periodPayments.length?periodPayments.map(p=>{const o=orders.find(x=>Number(x.id)===Number(p.order_id));return <button type="button" key={p.id} onClick={()=>o&&goToOrder(o)}><span>{formatDate(p.paid_at||p.created_at)}</span><span><b>Заказ №{p.order_id}</b><small>{o?`${getVehicleName(o.vehicle)} · ${getCustomerName(o.customer)}`:""}</small></span><span>{({cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"})[p.method]||p.method}</span><strong>{formatPrice(p.amount)}</strong><ChevronRight size={16}/></button>}):<div className="crmEmptyState">Платежей за выбранный период нет</div>}</div></div>
-            <div id="crm-v21-debts" className="crmPanel crmV21Journal"><div className="crmPanelHeader"><div><h2>Долги клиентов</h2><p>Заказы с неоплаченным остатком</p></div><AlertTriangle size={20}/></div><div className="crmV21Table">{debtOrders.length?debtOrders.map(o=><button type="button" key={o.id} onClick={()=>goToOrder(o)}><span>№{o.id}</span><span><b>{getVehicleName(o.vehicle)}</b><small>{getCustomerName(o.customer)}</small></span><span>Оплачено {formatPrice(getOrderEconomics(o).paid)}</span><strong>{formatPrice(getOrderEconomics(o).debt)}</strong><ChevronRight size={16}/></button>):<div className="crmEmptyState">Задолженности нет</div>}</div></div>
-          </section>}
+/* GarageFlow v9 documents */
+.crmCompanySettings{display:flex;flex-direction:column;gap:12px}.crmCompanySettings>label{display:flex;flex-direction:column;gap:6px;font-size:13px;font-weight:700}.crmCompanySettings input,.crmCompanySettings textarea{width:100%;box-sizing:border-box;border:1px solid #dfe3ea;border-radius:10px;padding:10px 12px;font:inherit;background:#fff}.crmDocumentsHint{margin:4px 0 12px;color:#707784;font-size:13px}.crmDocumentActions{display:flex;gap:10px;flex-wrap:wrap}.crmDocumentActions button{display:inline-flex;align-items:center;gap:8px;border:1px solid #d8dde6;background:#fff;border-radius:10px;padding:10px 14px;font-weight:700;cursor:pointer}.crmDocumentActions button:hover{background:#f6f8fb}
 
-          {activePage === "staff" && employee?.role !== "master" && <section className="crmDataSection crmV22Staff"><div className="crmV21Period"><strong>Период</strong>{[["week","Неделя"],["month","Месяц"],["year","Год"]].map(([k,l])=><button type="button" key={k} className={staffPeriod===k?"active":""} onClick={()=>setStaffPeriod(k)}>{l}</button>)}</div><div className="crmV22StaffGrid">{staffRows.map(r=><button type="button" className="crmPanel crmV22MasterCard crmV23MasterButton" key={r.master.id} onClick={()=>setSelectedMasterId(r.master.id)}><div className="crmPanelHeader"><div><h2>{r.master.display_name}</h2><p>{r.orders} заказов · {r.done} завершено · {r.openTasks} задач</p></div><UserCog size={20}/></div><div className="crmV22Money"><span>Начислено<strong>{formatPrice(r.accrued)}</strong></span><span>Выплачено<strong>{formatPrice(r.paid)}</strong></span><span className={r.due>0?"due":""}>К выплате<strong>{formatPrice(r.due)}</strong></span></div></button>)}</div>{employee?.role==="admin"&&<form className="crmPanel crmV22Payout" onSubmit={addPayout}><div className="crmPanelHeader"><div><h2>Выплата мастеру</h2><p>Фиксируется в истории зарплаты</p></div><Banknote size={20}/></div><select required value={payoutDraft.employee_id} onChange={e=>setPayoutDraft({...payoutDraft,employee_id:e.target.value})}><option value="">Выберите мастера</option>{staffRows.map(r=><option key={r.master.id} value={r.master.id}>{r.master.display_name}</option>)}</select><input required type="number" min="1" placeholder="Сумма, ₽" value={payoutDraft.amount} onChange={e=>setPayoutDraft({...payoutDraft,amount:e.target.value})}/><select value={payoutDraft.method} onChange={e=>setPayoutDraft({...payoutDraft,method:e.target.value})}><option value="cash">Наличные</option><option value="card">Карта</option><option value="transfer">Перевод</option></select><input placeholder="Комментарий" value={payoutDraft.note} onChange={e=>setPayoutDraft({...payoutDraft,note:e.target.value})}/><button className="crmCreateButton">Добавить выплату</button></form>}<div className="crmPanel"><div className="crmPanelHeader"><div><h2>История выплат</h2><p>{(adminData.payouts||[]).length} операций</p></div></div><div className="crmV22History">{(adminData.payouts||[]).map(p=>{const m=(adminData.employees||[]).find(e=>Number(e.id)===Number(p.employee_id));return <div key={p.id}><span><strong>{m?.display_name||"Мастер"}</strong><small>{formatDate(p.paid_at)} · {p.method}</small></span><b>{formatPrice(p.amount)}</b></div>})}</div></div></section>}
-          {activePage === "warehouse" && <section className="crmDataSection"><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Остатки материалов</h2><p>{adminData.inventory.length} позиций</p></div><Boxes size={20}/></div><div className="crmInventoryList">{adminData.inventory.length ? adminData.inventory.map((item)=><div className={`crmInventoryRow ${Number(item.quantity)<=Number(item.min_quantity)?"crmInventoryLow":""}`} key={item.id}><div><strong>{item.name}</strong><span>{formatPrice(item.price)} / {item.unit}</span></div><div><span>Остаток</span><strong>{item.quantity} {item.unit}</strong></div><div><span>Минимум</span><strong>{item.min_quantity} {item.unit}</strong></div></div>) : <div className="crmEmptyState">Добавьте первый материал</div>}</div></div><form className="crmPanel crmV4Form" onSubmit={saveInventory}><div className="crmPanelHeader"><div><h2>Добавить материал</h2><p>Контроль складских остатков</p></div><Plus size={20}/></div><label>Название<input required value={inventoryForm.name} onChange={(e)=>setInventoryForm({...inventoryForm,name:e.target.value})}/></label><div className="crmFormRow"><label>Ед. изм.<input value={inventoryForm.unit} onChange={(e)=>setInventoryForm({...inventoryForm,unit:e.target.value})}/></label><label>Остаток<input type="number" min="0" step="0.01" value={inventoryForm.quantity} onChange={(e)=>setInventoryForm({...inventoryForm,quantity:e.target.value})}/></label></div><div className="crmFormRow"><label>Мин. остаток<input type="number" min="0" step="0.01" value={inventoryForm.min_quantity} onChange={(e)=>setInventoryForm({...inventoryForm,min_quantity:e.target.value})}/></label><label>Цена<input type="number" min="0" value={inventoryForm.price} onChange={(e)=>setInventoryForm({...inventoryForm,price:e.target.value})}/></label></div><button className="crmCreateButton" type="submit"><Save size={17}/>Сохранить</button></form></div></section>}
+/* GarageFlow v10 — operational CRM */
+.crmMenuBadge{margin-left:auto;min-width:20px;height:20px;padding:0 6px;border-radius:999px;background:#ef4444;color:#fff;font-size:11px;font-weight:800;display:inline-flex;align-items:center;justify-content:center}
+.crmNewBadge{display:inline-block;margin-left:7px;padding:3px 6px;border-radius:999px;background:#dcfce7;color:#15803d;font-size:9px;letter-spacing:.05em;vertical-align:middle}
+.crmOperationalRow{display:grid;grid-template-columns:1fr 1fr auto;gap:12px;align-items:end}.crmOperationalRow>div{display:flex;flex-direction:column;gap:4px}.crmOperationalRow span{font-size:11px;color:#6b7280}.crmOperationalRow strong{font-size:13px}
+.crmTaskList{display:flex;flex-direction:column;gap:8px;margin:10px 0}.crmTaskRow{width:100%;border:1px solid #e5e7eb;background:#fff;border-radius:12px;padding:10px 12px;display:flex;gap:10px;text-align:left;align-items:flex-start}.crmTaskRow>span{font-size:20px;line-height:1}.crmTaskRow div{display:flex;flex-direction:column;gap:3px}.crmTaskRow small{color:#6b7280}.crmTaskDone{opacity:.58}.crmTaskDone strong{text-decoration:line-through}.crmTaskOverdue{border-color:#fecaca;background:#fff7f7}.crmTaskForm{display:grid;grid-template-columns:2fr 1.2fr 1fr auto;gap:8px}.crmTaskForm input,.crmTaskForm select{min-width:0;border:1px solid #d1d5db;border-radius:10px;padding:9px}.crmTaskForm button,.crmEmployeeTelegram{border:0;border-radius:10px;padding:9px 12px;background:#111827;color:#fff;font-weight:700;cursor:pointer}.crmEmployeeTelegram{margin-left:auto;font-size:11px;padding:7px 10px}
+@media(max-width:760px){.crmOperationalRow,.crmTaskForm{grid-template-columns:1fr}.crmEmployeeTelegram{margin-left:0}}
 
-          {activePage === "warehouse" && <section className="crmDataSection crmV22Warehouse"><div className="crmV4Grid"><form className="crmPanel crmV4Form" onSubmit={addReceipt}><div className="crmPanelHeader"><div><h2>Приход материала</h2><p>Поставка увеличивает фактический остаток</p></div><PackagePlus size={20}/></div><label>Материал<select required value={receiptForm.inventory_item_id} onChange={e=>setReceiptForm({...receiptForm,inventory_item_id:e.target.value})}><option value="">Выберите</option>{adminData.inventory.map(i=><option key={i.id} value={i.id}>{i.name}</option>)}</select></label><label>Поставщик<select value={receiptForm.supplier_id} onChange={e=>setReceiptForm({...receiptForm,supplier_id:e.target.value})}><option value="">Без поставщика</option>{(adminData.suppliers||[]).map(x=><option key={x.id} value={x.id}>{x.name}</option>)}</select></label><div className="crmFormRow"><label>Количество<input required type="number" min="0.01" step="0.01" value={receiptForm.quantity} onChange={e=>setReceiptForm({...receiptForm,quantity:e.target.value})}/></label><label>Закупочная цена<input required type="number" min="0" step="0.01" value={receiptForm.unit_price} onChange={e=>setReceiptForm({...receiptForm,unit_price:e.target.value})}/></label></div><input placeholder="Комментарий / накладная" value={receiptForm.note} onChange={e=>setReceiptForm({...receiptForm,note:e.target.value})}/><button className="crmCreateButton">Оприходовать</button></form><form className="crmPanel crmV4Form" onSubmit={createSupplier}><div className="crmPanelHeader"><div><h2>Поставщики</h2><p>{(adminData.suppliers||[]).length} поставщиков</p></div><Truck size={20}/></div><input required placeholder="Название" value={supplierForm.name} onChange={e=>setSupplierForm({...supplierForm,name:e.target.value})}/><div className="crmFormRow"><input placeholder="Телефон" value={supplierForm.phone} onChange={e=>setSupplierForm({...supplierForm,phone:e.target.value})}/><input placeholder="Email" value={supplierForm.email} onChange={e=>setSupplierForm({...supplierForm,email:e.target.value})}/></div><input placeholder="Комментарий" value={supplierForm.note} onChange={e=>setSupplierForm({...supplierForm,note:e.target.value})}/><button className="crmCreateButton">Добавить поставщика</button><div className="crmV22SupplierList">{(adminData.suppliers||[]).map(x=><span key={x.id}><strong>{x.name}</strong><small>{x.phone||x.email||"Контакты не указаны"}</small></span>)}</div></form></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Нужно заказать</h2><p>Доступный остаток = склад минус резерв заказов</p></div><AlertTriangle size={20}/></div><div className="crmV22History">{purchaseList.length?purchaseList.map(i=><div key={i.id}><span><strong>{i.name}</strong><small>На складе {i.quantity} {i.unit} · резерв {i.reserved} · доступно {i.available}</small></span><b>мин. {i.min_quantity}</b></div>):<div className="crmEmptyState">Все остатки выше минимума</div>}</div></div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Последние приходы</h2><p>История движения склада</p></div></div><div className="crmV22History">{(adminData.receipts||[]).slice(0,30).map(r=><div key={r.id}><span><strong>{r.inventory_item?.name||"Материал"}</strong><small>{formatDate(r.created_at)} · {r.supplier?.name||"без поставщика"}</small></span><b>+{r.quantity} · {formatPrice(r.unit_price)}</b></div>)}</div></div></section>}
-          {activePage === "settings" && employee?.role === "admin" && <section className="crmDataSection"><div className="crmPanel crmLaunchPanel"><div className="crmPanelHeader"><div><h2>Готовность к запуску</h2><p>Чек-лист перед передачей GarageFlow новой компании</p></div><strong className="crmLaunchScore">{launchReadyCount}/{launchChecklist.length}</strong></div><div className="crmLaunchChecklist">{launchChecklist.map((item)=><div key={item.key} className={item.done?"crmLaunchItem crmLaunchItemDone":"crmLaunchItem"}><span>{item.done?"✓":"○"}</span><strong>{item.label}</strong></div>)}</div><p className="crmHint">Для новой компании создавайте отдельные Supabase, Telegram-бот и Vercel-проект. Эта мастер-версия не требует изменения бизнес-логики под каждого клиента.</p></div><div className="crmV4Grid"><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Услуги и цены</h2><p>Изменения применяются к новым заказам</p></div><Wrench size={20}/></div>{employee?.role === "admin" ? <><div className="crmServiceEditorList">{adminData.services.map((svc)=>{const draft=getServiceDraft(svc);return <div className={`crmServiceEditor ${draft.is_active?"":"crmServiceEditorDisabled"}`} key={svc.id}><div className="crmServiceEditorFields"><label>Название<input value={draft.name} onChange={(e)=>updateServiceDraft(svc,"name",e.target.value)}/></label><label>Цена, ₽<input type="number" min="0" step="1" value={draft.base_price} onChange={(e)=>updateServiceDraft(svc,"base_price",e.target.value)}/></label><label className="crmServiceDescription">Описание<input value={draft.description} onChange={(e)=>updateServiceDraft(svc,"description",e.target.value)}/></label></div><div className="crmServiceEditorActions"><label className="crmServiceToggle"><input type="checkbox" checked={draft.is_active} onChange={(e)=>updateServiceDraft(svc,"is_active",e.target.checked)}/><span>{draft.is_active?"Активна":"Отключена"}</span></label><button className="crmCreateButton" type="button" disabled={savingServiceId===svc.id} onClick={()=>saveService(svc)}><Save size={16}/>{savingServiceId===svc.id?"Сохраняем...":"Сохранить"}</button></div></div>})}</div><form className="crmNewServiceForm" onSubmit={createService}><div><h3>Добавить услугу</h3><p>Новая услуга сразу появится в каталоге и при создании заказа</p></div><div className="crmFormRow"><label>Название<input required value={newService.name} onChange={(e)=>setNewService({...newService,name:e.target.value})}/></label><label>Цена, ₽<input required type="number" min="0" step="1" value={newService.base_price} onChange={(e)=>setNewService({...newService,base_price:e.target.value})}/></label></div><label>Описание<input value={newService.description} onChange={(e)=>setNewService({...newService,description:e.target.value})}/></label><button className="crmCreateButton" type="submit" disabled={savingServiceId==="new"}><Plus size={16}/>{savingServiceId==="new"?"Добавляем...":"Добавить услугу"}</button></form></> : <p className="crmHint">Изменять услуги и цены может только администратор.</p>}</div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Telegram-уведомления</h2><p>Что отправлять клиенту при изменении заказа</p></div><AtSign size={20}/></div><div className="crmNotifySettings"><label><input type="checkbox" checked={notificationSettings.status_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,status_enabled:e.target.checked})}/><span><strong>Изменение статуса</strong><small>Согласование, производство, установка, готово и отмена</small></span></label><label><input type="checkbox" checked={notificationSettings.price_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,price_enabled:e.target.checked})}/><span><strong>Изменение стоимости</strong><small>Сообщить клиенту новую итоговую цену</small></span></label><label><input type="checkbox" checked={notificationSettings.schedule_enabled!==false} onChange={(e)=>setNotificationSettings({...notificationSettings,schedule_enabled:e.target.checked})}/><span><strong>Дата записи</strong><small>Сообщить о новой дате и времени</small></span></label></div><button className="crmCreateButton" type="button" disabled={savingNotificationSettings} onClick={saveNotificationSettings}><Save size={16}/>{savingNotificationSettings?"Сохраняем...":"Сохранить уведомления"}</button></div><div className="crmPanel crmCompanySettings"><div className="crmPanelHeader"><div><h2>Реквизиты и документы</h2><p>Используются в КП и заказ-нарядах</p></div><FileText size={20}/></div>{employee?.role === "admin" ? <><label>Название компании<input value={companySettings.company_name||""} onChange={(e)=>setCompanySettings({...companySettings,company_name:e.target.value})}/></label><label>Юридическое название<input value={companySettings.legal_name||""} onChange={(e)=>setCompanySettings({...companySettings,legal_name:e.target.value})}/></label><div className="crmFormRow"><label>ИНН<input value={companySettings.inn||""} onChange={(e)=>setCompanySettings({...companySettings,inn:e.target.value})}/></label><label>КПП<input value={companySettings.kpp||""} onChange={(e)=>setCompanySettings({...companySettings,kpp:e.target.value})}/></label></div><label>Адрес<input value={companySettings.address||""} onChange={(e)=>setCompanySettings({...companySettings,address:e.target.value})}/></label><div className="crmFormRow"><label>Телефон<input value={companySettings.phone||""} onChange={(e)=>setCompanySettings({...companySettings,phone:e.target.value})}/></label><label>Email<input value={companySettings.email||""} onChange={(e)=>setCompanySettings({...companySettings,email:e.target.value})}/></label></div><label>Банковские реквизиты<textarea rows="3" value={companySettings.bank_details||""} onChange={(e)=>setCompanySettings({...companySettings,bank_details:e.target.value})}/></label><label>Текст внизу документа<textarea rows="2" value={companySettings.document_footer||""} onChange={(e)=>setCompanySettings({...companySettings,document_footer:e.target.value})}/></label><button className="crmCreateButton" type="button" disabled={savingCompanySettings} onClick={saveCompanySettings}><Save size={16}/>{savingCompanySettings?"Сохраняем...":"Сохранить реквизиты"}</button></> : <p className="crmHint">Изменять реквизиты может только администратор.</p>}</div><div className="crmPanel"><div className="crmPanelHeader"><div><h2>Сотрудники</h2><p>Доступ к CRM</p></div><Users size={20}/></div><div className="crmSettingsList">{adminData.employees.map((emp)=><div className="crmSettingsRow crmEmployeeAdminRow" key={emp.id}><div><strong>{emp.display_name||"Сотрудник"}</strong><span>{roleLabels[emp.role]||emp.role}</span></div>{employee?.role==="admin"?<><select className="crmEmployeeRole" value={emp.role||"master"} disabled={savingEmployeeId===emp.id} onChange={(e)=>saveEmployeeProfile(emp,{role:e.target.value})}><option value="admin">Администратор</option><option value="manager">Менеджер</option><option value="master">Мастер</option></select><label className="crmEmployeeActive"><input type="checkbox" checked={emp.is_active!==false} disabled={savingEmployeeId===emp.id||emp.id===employee?.id} onChange={(e)=>saveEmployeeProfile(emp,{is_active:e.target.checked})}/><span>{emp.is_active?"Активен":"Отключён"}</span></label><button type="button" className="crmEmployeeTelegram" onClick={()=>saveEmployeeTelegram(emp)}>{emp.telegram_chat_id?"Telegram ✓":"+ Telegram"}</button></>:<span className={emp.is_active?"crmActiveDot":"crmInactiveDot"}>{emp.is_active?"Активен":"Отключён"}</span>}</div>)}</div><p className="crmHint">Роли: администратор — полный доступ; менеджер — продажи, клиенты, документы и аналитика; мастер — только назначенные заказы, производство, материалы, задачи и календарь. Права на критические действия проверяются сервером.</p></div></div></section>}
 
-          {activePage === "analytics" && <>
-            <section className="crmStats crmStatsFive">
-              <button type="button" className="crmStat crmV21StatButton" onClick={()=>setActivePage("finance")}><span>Выручка</span><strong>{formatPrice(totalRevenue)}</strong></button>
-              <div className="crmStat"><span>Оплачено</span><strong>{formatPrice(businessEconomics.paid)}</strong></div>
-              <div className="crmStat"><span>Долг клиентов</span><strong>{formatPrice(businessEconomics.debt)}</strong></div>
-              <div className="crmStat"><span>Материалы</span><strong>{formatPrice(businessEconomics.materialCost)}</strong></div>
-              <div className="crmStat"><span>Труд</span><strong>{formatPrice(businessEconomics.laborCost)}</strong></div>
-              <div className="crmStat"><span>Прибыль</span><strong>{formatPrice(businessEconomics.profit)}</strong></div>
-              <div className="crmStat"><span>Маржа</span><strong>{businessMargin.toFixed(1)}%</strong></div>
-            </section>
-            <section className="crmAnalyticsGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Экономика по месяцам</h2><p>Выручка и валовая прибыль за последние 6 месяцев</p></div><TrendingUp size={20}/></div><div className="crmRevenueChart">{monthlyStats.map((m)=><div className="crmRevenueColumn" key={m.key}><div className="crmRevenueValue">{m.revenue ? formatPrice(m.revenue) : "0 ₽"}</div><div className="crmRevenueBarWrap"><div className="crmRevenueBar" style={{height:`${Math.max(m.revenue ? 10 : 2,(m.revenue/maxMonthlyRevenue)*100)}%`}}/></div><strong>{m.label}</strong><span>{m.orders} заказ. · прибыль {formatPrice(m.profit)}</span></div>)}</div></div>
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Популярные услуги</h2><p>По количеству в заказах</p></div><Wrench size={20}/></div><div className="crmServiceStats">{serviceStats.length ? serviceStats.map((item,index)=><div className="crmServiceStat" key={item.name}><div className="crmServiceRank">{index+1}</div><div><strong>{item.name}</strong><span>{item.count} шт. · {formatPrice(item.revenue)}</span></div></div>) : <div className="crmEmptyState">Пока недостаточно данных</div>}</div></div>
-            </section>
-            <section className="crmAnalyticsGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Статусы заказов</h2><p>Текущая загрузка</p></div><BarChart3 size={20}/></div><div className="crmFunnel">{funnel.map((item)=><div className="crmFunnelItem" key={item.key}><div className="crmFunnelTop"><span>{item.label}</span><strong>{item.count}</strong></div><div className="crmFunnelTrack"><div className="crmFunnelFill" style={{width:`${Math.max(item.count?12:0,(item.count/maxFunnel)*100)}%`}}/></div></div>)}</div></div>
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Контроль работы</h2><p>Что требует внимания</p></div><AlertTriangle size={20}/></div><div className="crmControlStats"><div><span>Срочные заказы</span><strong>{urgentOrders.length}</strong></div><div><span>Высокий приоритет</span><strong>{highPriorityOrders.length}</strong></div><div><span>Просроченные записи</span><strong>{overdueOrders.length}</strong></div><div><span>Отменённые</span><strong>{cancelledOrders.length}</strong></div></div></div>
-            </section>
-            <section className="crmStats"><div className="crmStat"><span>Всего лидов</span><strong>{orders.length}</strong></div><div className="crmStat"><span>Выполнено</span><strong>{doneOrders}</strong></div><div className="crmStat"><span>Отказов</span><strong>{cancelledOrders.length}</strong></div><div className="crmStat"><span>Конверсия в выполненные</span><strong>{overallConversion}%</strong></div></section>
-            <section className="crmAnalyticsGrid">
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Источники заявок</h2><p>Количество, выполненные заказы и выручка</p></div><Users size={20}/></div><div className="crmServiceStats">{sourceStats.length?sourceStats.map((x)=><div className="crmServiceStat" key={x.key}><div className="crmServiceRank">{x.count}</div><div><strong>{leadSourceLabels[x.key]||x.key}</strong><span>{x.done} выполнено · {formatPrice(x.revenue)}</span></div></div>):<div className="crmEmptyState">Пока недостаточно данных</div>}</div></div>
-              <div className="crmPanel"><div className="crmPanelHeader"><div><h2>Причины отказов</h2><p>Почему заявки не дошли до выполнения</p></div><X size={20}/></div><div className="crmServiceStats">{cancellationStats.length?cancellationStats.map(([key,count])=><div className="crmServiceStat" key={key}><div className="crmServiceRank">{count}</div><div><strong>{cancellationReasonLabels[key]||key}</strong><span>отменённых заказов</span></div></div>):<div className="crmEmptyState">Отказов с указанной причиной пока нет</div>}</div></div>
-            </section>
-          </>}
-        </>}
-      </main>
+/* GarageFlow v13 — roles, workload and responsive CRM */
+.crmMonthNumber{display:flex;align-items:center;justify-content:space-between;gap:6px}
+.crmLoadBadge{min-width:22px;height:22px;padding:0 6px;border-radius:999px;display:inline-grid;place-items:center;background:#e8f2ff;color:#1672f3;font-size:10px;font-weight:900}
+.crmLoadBadge.crmLoadMedium{background:#fff3d8;color:#9a6500}
+.crmLoadBadge.crmLoadHigh{background:#ffe5e5;color:#c53b3b}
+.crmEmployeeAdminRow{gap:10px;flex-wrap:wrap}
+.crmEmployeeRole{min-width:145px;border:1px solid #dfe5ed;border-radius:9px;padding:8px 10px;background:#fff;color:#17233a}
+.crmEmployeeActive{display:flex!important;align-items:center;gap:7px;font-size:11px;font-weight:800;color:#506079}
+.crmEmployeeActive input{width:auto!important;margin:0}
+@media (max-width:900px){
+  .crm{display:block}.crmSidebar{position:sticky;top:0;z-index:30;width:100%;min-height:auto;padding:12px 14px}.crmSidebarSubtitle,.crmSidebarBottom{display:none}.crmSidebarBrand{margin-bottom:10px}.crmMenu{display:flex;overflow-x:auto;gap:6px;padding-bottom:2px}.crmMenuItem{min-width:max-content;padding:9px 11px}.crmMain{margin-left:0!important;width:100%;padding:18px}.crmTopbar{align-items:flex-start;gap:12px}.crmTopbar h1{font-size:24px}.crmMonthSection{overflow-x:auto}.crmWeekdays,.crmMonthGrid{min-width:760px}.crmModal{width:calc(100vw - 20px)!important;max-height:94vh!important}.crmV4Grid,.crmAnalyticsGrid{grid-template-columns:1fr!important}}
+@media (max-width:600px){.crmMain{padding:12px}.crmStats,.crmStatsFive{grid-template-columns:repeat(2,minmax(0,1fr))!important}.crmTopbar{flex-direction:column}.crmRefresh{width:100%;justify-content:center}.crmDocumentActions,.crmFormRow,.crmTaskForm{grid-template-columns:1fr!important;display:grid!important}.crmEmployeeAdminRow{align-items:stretch}.crmEmployeeRole,.crmEmployeeTelegram{width:100%}}
+\n\n/* GarageFlow v14.1: operational calendar */\n.crmCalendarV14 .crmCalendarSummary{grid-template-columns:repeat(4,1fr)}\n.crmCalendarControlBar{display:flex;justify-content:space-between;align-items:center;gap:12px;margin:0 0 14px}\n.crmCalendarViewSwitch{display:flex;background:#e9eef5;border-radius:11px;padding:4px;gap:4px}\n.crmCalendarViewSwitch button,.crmTodayButton{border:0;background:transparent;border-radius:8px;padding:9px 14px;font:inherit;font-weight:700;color:#68768a;cursor:pointer}\n.crmCalendarViewSwitch button.active{background:#fff;color:#1672f3;box-shadow:0 2px 8px rgba(25,45,75,.08)}\n.crmTodayButton{background:#fff;border:1px solid #dfe5ed;color:#40506a}\n.crmWeekPlanner{display:grid;grid-template-columns:repeat(7,minmax(135px,1fr));gap:9px;overflow-x:auto;padding-bottom:6px}\n.crmWeekPlannerDay{border:1px solid #e1e7ef;background:#fff;border-radius:14px;padding:0;min-height:330px;text-align:left;overflow:hidden;cursor:pointer;color:inherit}\n.crmWeekPlannerDay:hover{border-color:#b9cee9}\n.crmWeekPlannerSelected{border-color:#1672f3;box-shadow:0 0 0 1px #1672f3 inset}\n.crmWeekPlannerToday .crmWeekPlannerHead{background:#eef5ff}\n.crmWeekPlannerHead{padding:12px;border-bottom:1px solid #edf0f4;display:grid;grid-template-columns:1fr auto;align-items:center;gap:3px}\n.crmWeekPlannerHead span{font-size:11px;color:#7f8b9d;text-transform:capitalize}\n.crmWeekPlannerHead strong{font-size:22px;grid-row:2}\n.crmWeekPlannerHead b{grid-row:1/3;grid-column:2;background:#edf2f8;border-radius:999px;min-width:26px;height:26px;display:grid;place-items:center;font-size:11px;color:#53627a}\n.crmWeekPlannerEvents{padding:8px;display:flex;flex-direction:column;gap:7px}\n.crmWeekPlannerEvent{background:#f6f9fd;border:1px solid #e6edf6;border-radius:10px;padding:9px;display:flex;flex-direction:column;gap:3px}\n.crmWeekPlannerEvent time{font-size:11px;font-weight:800;color:#1672f3}\n.crmWeekPlannerEvent strong{font-size:12px}\n.crmWeekPlannerEvent span,.crmWeekPlannerEvent small{font-size:10px;color:#7c899b}\n.crmWeekPlannerEmpty{padding:22px 6px;text-align:center;color:#a0a9b6;font-size:11px}\n@media(max-width:900px){.crmCalendarV14 .crmCalendarSummary{grid-template-columns:repeat(2,1fr)}.crmWeekPlanner{grid-template-columns:repeat(7,minmax(155px,1fr))}}\n@media(max-width:700px){.crmCalendarV14 .crmCalendarSummary{grid-template-columns:1fr 1fr}.crmCalendarControlBar{align-items:stretch}.crmCalendarViewSwitch{flex:1}.crmCalendarViewSwitch button{flex:1}.crmMonthToolbar h2{min-width:0;font-size:16px}.crmWeekPlanner{min-width:1080px}}\n
+/* GarageFlow v14.2: mobile CRM + calendar polish */
+.crmWeekPlannerHead span,.crmWeekPlannerHead strong,.crmWeekPlannerHead b{line-height:1.15}
+.crmWeekPlannerHead strong{display:block;margin-top:3px}
+@media(max-width:700px){
+  .crm{padding-bottom:74px}
+  .crmSidebar{position:fixed!important;left:0;right:0;top:auto!important;bottom:0;z-index:60;width:100%!important;padding:7px 8px calc(7px + env(safe-area-inset-bottom));background:#13233d;box-shadow:0 -8px 24px rgba(15,30,55,.16)}
+  .crmSidebarBrand,.crmSidebarBottom,.crmSidebarSubtitle{display:none!important}
+  .crmMenu{display:grid!important;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px;overflow:visible!important;padding:0!important;margin:0!important}
+  .crmMenuItem{min-width:0!important;padding:7px 3px!important;display:flex!important;flex-direction:column;justify-content:center;align-items:center;gap:3px;border-radius:9px;font-size:9px!important;line-height:1.1;text-align:center;white-space:normal!important}
+  .crmMenuItem svg{width:18px;height:18px;flex:none}
+  .crmMenuBadge{position:absolute;transform:translate(11px,-10px);margin:0;min-width:16px;height:16px;padding:0 4px;font-size:9px}
+  .crmMain{padding:12px 10px 18px!important;margin:0!important;width:100%!important;box-sizing:border-box}
+  .crmTopbar{margin-bottom:14px!important}.crmTopbar h1{font-size:22px!important}.crmTopbar p{font-size:11px}
+  .crmStats,.crmStatsFive{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px!important}.crmStat{padding:12px!important}.crmStat strong{font-size:19px!important}
+  .crmToolbar,.crmToolbarSplit{gap:8px!important}.crmSearch{width:100%!important}.crmOrderFilters{display:grid!important;grid-template-columns:1fr 1fr;gap:7px!important}.crmOrderFilters select,.crmOrderFilters button{min-width:0!important;width:100%}
+  .crmBoard{display:flex!important;gap:10px!important;overflow-x:auto!important;scroll-snap-type:x mandatory;padding-bottom:12px!important}.crmColumn{min-width:86vw!important;scroll-snap-align:start}.crmColumnCards{min-height:260px!important}
+  .crmModalOverlay{padding:0!important;align-items:flex-end!important}.crmModal{width:100vw!important;max-width:none!important;max-height:96dvh!important;border-radius:18px 18px 0 0!important;padding:18px 14px calc(20px + env(safe-area-inset-bottom))!important}
+  .crmModal h2{font-size:24px!important}.crmModalClose{position:sticky!important;top:0;z-index:3}
+  .crmPriorityChoices{grid-template-columns:repeat(3,1fr)!important}.crmPriorityChoice{padding:9px 4px!important;font-size:10px!important}
+  .crmEconomicsGrid{grid-template-columns:repeat(2,minmax(0,1fr))!important}.crmDocumentActions{display:grid!important;grid-template-columns:1fr!important}.crmDocumentActions button{width:100%;justify-content:flex-start}
+  .crmCalendarV14 .crmCalendarSummary{grid-template-columns:repeat(2,minmax(0,1fr))!important;gap:8px}.crmCalendarSummary>div{padding:11px!important}.crmCalendarSummary strong{font-size:17px!important}
+  .crmCalendarControlBar{display:grid!important;grid-template-columns:1fr auto;gap:8px!important}.crmCalendarViewSwitch button,.crmTodayButton{padding:8px 10px!important;font-size:11px}
+  .crmWeekPlanner{display:flex!important;min-width:0!important;overflow-x:auto!important;scroll-snap-type:x mandatory;gap:8px!important}.crmWeekPlannerDay{min-width:78vw!important;min-height:250px!important;scroll-snap-align:center}.crmWeekPlannerHead{grid-template-columns:1fr auto!important;padding:11px!important}.crmWeekPlannerHead span{font-size:12px!important}.crmWeekPlannerHead strong{font-size:25px!important}.crmWeekPlannerHead b{min-width:25px;height:25px}
+  .crmMonthSection{overflow:visible!important}.crmWeekdays,.crmMonthGrid{min-width:680px}.crmDayAgenda .crmListRow{align-items:flex-start}.crmCalendarStatus{font-size:9px}
+  .crmV4Grid,.crmDataGrid,.crmAnalyticsGrid{grid-template-columns:1fr!important}.crmInventoryRow,.crmSettingsRow{grid-template-columns:1fr!important;gap:8px!important}.crmFormRow,.crmTaskForm,.crmOperationalRow{grid-template-columns:1fr!important}
+}
+@media(max-width:380px){.crmMenuItem{font-size:8px!important}.crmMain{padding-left:8px!important;padding-right:8px!important}.crmWeekPlannerDay{min-width:84vw!important}}
 
-      {showCreateOrder && <div className="crmModalBackdrop" onClick={()=>setShowCreateOrder(false)}><form className="crmModal crmCreateOrderModal" onSubmit={createManualOrder} onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setShowCreateOrder(false)}><X size={21}/></button><div className="crmOrderNumber">НОВЫЙ ЗАКАЗ</div><h2>Создать заказ вручную</h2><p className="crmModalCustomer">Для звонков, WhatsApp и заявок вне Telegram</p><div className="crmModalSection"><span className="crmModalLabel">Клиент</span><div className="crmFormRow"><label>Имя<input required value={newOrder.first_name} onChange={(e)=>setNewOrder({...newOrder,first_name:e.target.value})}/></label><label>Фамилия<input value={newOrder.last_name} onChange={(e)=>setNewOrder({...newOrder,last_name:e.target.value})}/></label></div><div className="crmFormRow"><label>Телефон<input value={newOrder.phone} onChange={(e)=>setNewOrder({...newOrder,phone:e.target.value})}/></label><label>Telegram<input value={newOrder.username} onChange={(e)=>setNewOrder({...newOrder,username:e.target.value})}/></label></div></div><div className="crmModalSection"><span className="crmModalLabel">Автомобиль</span><div className="crmFormRow"><label>Марка<input required value={newOrder.brand} onChange={(e)=>setNewOrder({...newOrder,brand:e.target.value})}/></label><label>Модель<input required value={newOrder.model} onChange={(e)=>setNewOrder({...newOrder,model:e.target.value})}/></label></div><div className="crmFormRow"><label>Год<input type="number" value={newOrder.year} onChange={(e)=>setNewOrder({...newOrder,year:e.target.value})}/></label><label>Конфигурация<input value={newOrder.configuration} onChange={(e)=>setNewOrder({...newOrder,configuration:e.target.value})}/></label></div><div className="crmFormRow"><label>Госномер<input value={newOrder.license_plate} onChange={(e)=>setNewOrder({...newOrder,license_plate:e.target.value})}/></label><label>VIN<input value={newOrder.vin} onChange={(e)=>setNewOrder({...newOrder,vin:e.target.value})}/></label></div></div><div className="crmModalSection"><span className="crmModalLabel">Услуги</span><div className="crmServicePicker">{adminData.services.filter((x)=>x.is_active).map((svc)=><label key={svc.id}><input type="checkbox" checked={newOrder.service_ids.includes(svc.id)} onChange={(e)=>setNewOrder({...newOrder,service_ids:e.target.checked?[...newOrder.service_ids,svc.id]:newOrder.service_ids.filter((id)=>id!==svc.id)})}/><span><strong>{svc.name}</strong><small>{formatPrice(svc.base_price)}</small></span></label>)}</div></div><div className="crmModalSection"><span className="crmModalLabel">Запись и приоритет</span><div className="crmFormRow"><label>Дата и время<input type="datetime-local" value={newOrder.scheduled_at} onChange={(e)=>setNewOrder({...newOrder,scheduled_at:e.target.value})}/></label><label>Приоритет<select value={newOrder.priority} onChange={(e)=>setNewOrder({...newOrder,priority:e.target.value})}><option value="normal">Обычный</option><option value="high">Высокий</option><option value="urgent">Срочный</option></select></label></div><label>Источник заявки<select value={newOrder.lead_source} onChange={(e)=>setNewOrder({...newOrder,lead_source:e.target.value})}><option value="phone">Телефон</option><option value="website">Сайт</option><option value="recommendation">Рекомендация</option><option value="whatsapp">WhatsApp</option><option value="manual">Вручную</option><option value="other">Другое</option></select></label><label>Комментарий<textarea rows="3" value={newOrder.comment} onChange={(e)=>setNewOrder({...newOrder,comment:e.target.value})}/></label></div><button className="crmCreateButton crmCreateWide" type="submit" disabled={savingOrder}>{savingOrder?"Создаём...":"Создать заказ"}</button></form></div>}
+/* GarageFlow v14.2.1: mobile month calendar width hotfix */
+@media (max-width:700px) {
+  .crmMonthSection {
+    width:100%;
+    max-width:100%;
+    overflow:hidden!important;
+  }
+  .crmWeekdays,
+  .crmMonthGrid {
+    width:100%!important;
+    min-width:0!important;
+    max-width:100%!important;
+    grid-template-columns:repeat(7,minmax(0,1fr))!important;
+    gap:3px!important;
+  }
+  .crmWeekdays span {
+    min-width:0;
+    font-size:9px!important;
+  }
+  .crmMonthGrid {
+    overflow:visible!important;
+  }
+  .crmMonthDay {
+    min-width:0!important;
+    min-height:64px!important;
+    border-radius:9px!important;
+    padding:6px 4px!important;
+    overflow:hidden;
+  }
+  .crmMonthNumber {
+    min-width:0;
+    margin-bottom:3px!important;
+    font-size:11px!important;
+    gap:2px!important;
+  }
+  .crmMonthEvent {
+    margin-top:3px!important;
+    padding:3px!important;
+    border-radius:5px!important;
+    font-size:7px!important;
+  }
+  .crmMonthDay small {
+    margin-top:2px!important;
+    font-size:7px!important;
+  }
+  .crmLoadBadge {
+    min-width:16px!important;
+    width:16px!important;
+    height:16px!important;
+    padding:0!important;
+    font-size:8px!important;
+  }
+  .crmMonthToolbar {
+    width:100%;
+    gap:8px!important;
+    margin-bottom:12px!important;
+  }
+  .crmMonthToolbar h2 {
+    flex:1;
+    min-width:0!important;
+    font-size:16px!important;
+    white-space:nowrap;
+  }
+  .crmMonthToolbar button {
+    width:40px!important;
+    min-width:40px!important;
+    height:40px!important;
+  }
+}
+@media (max-width:380px) {
+  .crmWeekdays,.crmMonthGrid { gap:2px!important; }
+  .crmMonthDay { min-height:58px!important; padding:5px 3px!important; }
+  .crmMonthNumber { font-size:10px!important; }
+}
 
-      {selectedCustomer && <div className="crmModalBackdrop" onClick={()=>setSelectedCustomer(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedCustomer(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА КЛИЕНТА</div><h2>{getCustomerName(selectedCustomer)}</h2><p className="crmModalCustomer">{selectedCustomer.ordersCount} заказ(а) · {formatPrice(selectedCustomer.total)}</p><button className="crmInlineEdit" type="button" onClick={()=>editCustomerQuick(selectedCustomer)}><Pencil size={16}/>Редактировать клиента</button><div className="crmEntityFacts">{selectedCustomer.phone&&<div><Phone size={17}/><span>Телефон</span><strong>{selectedCustomer.phone}</strong></div>}{selectedCustomer.username&&<div><AtSign size={17}/><span>Telegram</span><strong>@{selectedCustomer.username}</strong></div>}</div><div className="crmModalSection"><span className="crmModalLabel">Автомобили</span><div className="crmModalItems">{vehicles.filter((v)=>v.customer?.id===selectedCustomer.id).map((v)=><button className="crmEntityRow" key={v.id} onClick={()=>{setSelectedCustomer(null);setSelectedVehicle(v);}}><Car size={17}/><div><strong>{getVehicleName(v)}</strong><span>{v.license_plate||"Госномер не указан"}</span></div><ChevronRight size={17}/></button>)}</div></div><div className="crmModalSection"><span className="crmModalLabel">История заказов</span><div className="crmModalItems">{[...(selectedCustomer.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedCustomer(null);goToOrder(o);}}><ClipboardList size={17}/><div><strong>Заказ №{o.id} · {getVehicleName(o.vehicle)}</strong><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
+/* ===== GarageFlow v14.3: mobile orders + compact order card ===== */
+.crmMobileStatusTabs { display: none; }
 
-      {selectedVehicle && <div className="crmModalBackdrop" onClick={()=>setSelectedVehicle(null)}><div className="crmModal crmEntityModal" onClick={(e)=>e.stopPropagation()}><button className="crmModalClose" type="button" onClick={()=>setSelectedVehicle(null)}><X size={21}/></button><div className="crmOrderNumber">КАРТОЧКА АВТОМОБИЛЯ</div><h2>{getVehicleName(selectedVehicle)}</h2><p className="crmModalCustomer">{getCustomerName(selectedVehicle.customer)} · {selectedVehicle.ordersCount} заказ(а)</p><button className="crmInlineEdit" type="button" onClick={()=>editVehicleQuick(selectedVehicle)}><Pencil size={16}/>Редактировать автомобиль</button><div className="crmEntityFacts"><div><Car size={17}/><span>Год</span><strong>{selectedVehicle.year||"Не указан"}</strong></div>{selectedVehicle.license_plate&&<div><Hash size={17}/><span>Госномер</span><strong>{selectedVehicle.license_plate}</strong></div>}{selectedVehicle.vin&&<div><Hash size={17}/><span>VIN</span><strong>{selectedVehicle.vin}</strong></div>}<div><CircleDollarSign size={17}/><span>Сумма работ</span><strong>{formatPrice(selectedVehicle.total)}</strong></div></div><div className="crmModalSection"><span className="crmModalLabel">История работ</span><div className="crmModalItems">{[...(selectedVehicle.orders||[])].sort((a,b)=>new Date(b.created_at)-new Date(a.created_at)).map((o)=><button className="crmEntityRow" key={o.id} onClick={()=>{setSelectedVehicle(null);goToOrder(o);}}><Wrench size={17}/><div><strong>Заказ №{o.id}</strong><span>{o.items?.map((i)=>i.service_name).join(" • ")||"Работы не указаны"}</span><span>{statusLabels[o.status]||o.status} · {formatPrice(orderAmount(o))}</span></div><ChevronRight size={17}/></button>)}</div></div></div></div>}
+@media (max-width: 760px) {
+  .crmMobileStatusTabs {
+    display: flex;
+    gap: 8px;
+    overflow-x: auto;
+    padding: 2px 0 10px;
+    margin: 4px 0 8px;
+    scrollbar-width: none;
+    -webkit-overflow-scrolling: touch;
+  }
+  .crmMobileStatusTabs::-webkit-scrollbar { display: none; }
+  .crmMobileStatusTabs button {
+    flex: 0 0 auto;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    min-height: 42px;
+    padding: 0 13px;
+    border: 1px solid #dce4ef;
+    border-radius: 13px;
+    background: #fff;
+    color: #64748b;
+    font: inherit;
+    font-size: 13px;
+    font-weight: 700;
+  }
+  .crmMobileStatusTabs button b {
+    min-width: 23px;
+    height: 23px;
+    padding: 0 6px;
+    border-radius: 8px;
+    display: grid;
+    place-items: center;
+    background: #eef2f7;
+    color: #17233a;
+    font-size: 11px;
+  }
+  .crmMobileStatusTabs button.active {
+    border-color: #1672f3;
+    background: #eef5ff;
+    color: #1672f3;
+  }
+  .crmMobileStatusTabs button.active b { background: #1672f3; color: #fff; }
 
-      {selectedMasterId && employee?.role !== "master" && (()=>{const row=staffRows.find(x=>Number(x.master.id)===Number(selectedMasterId));if(!row)return null;const own=orders.filter(o=>Number(o.assigned_employee_id||o.employee_id||0)===Number(selectedMasterId));const payouts=(adminData.payouts||[]).filter(p=>Number(p.employee_id)===Number(selectedMasterId));return <div className="crmModalBackdrop" onMouseDown={()=>setSelectedMasterId(null)}><div className="crmModal crmV23MasterModal" onMouseDown={e=>e.stopPropagation()}><button className="crmModalClose" onClick={()=>setSelectedMasterId(null)}><X size={20}/></button><span className="crmModalLabel">Карточка мастера</span><h2>{row.master.display_name}</h2><div className="crmV20MoneyGrid"><div><span>Заказов</span><strong>{row.orders}</strong></div><div><span>Завершено</span><strong>{row.done}</strong></div><div><span>Открытых задач</span><strong>{row.openTasks}</strong></div><div><span>Начислено</span><strong>{formatPrice(row.accrued)}</strong></div><div><span>Выплачено</span><strong>{formatPrice(row.paid)}</strong></div><div className={row.due>0?"debt":"ok"}><span>К выплате</span><strong>{formatPrice(row.due)}</strong></div></div><div className="crmModalSection"><span className="crmModalLabel">Заказы мастера</span><div className="crmV22History">{own.length?own.slice(0,20).map(o=><button type="button" key={o.id} onClick={()=>{setSelectedMasterId(null);goToOrder(o)}}><span><strong>№{o.id} · {getVehicleName(o.vehicle)}</strong><small>{statusLabels[o.status]||o.status} · {formatDate(o.updated_at||o.created_at)}</small></span><b>{formatPrice(getOrderEconomics(o).masterPay)}</b></button>):<div className="crmEmptyState">Заказов пока нет</div>}</div></div><div className="crmModalSection"><span className="crmModalLabel">Последние выплаты</span><div className="crmV22History">{payouts.length?payouts.slice(0,15).map(p=><div key={p.id}><span><strong>{formatPrice(p.amount)}</strong><small>{formatDate(p.paid_at)} · {p.method}</small></span></div>):<div className="crmEmptyState">Выплат пока нет</div>}</div>{employee?.role==="admin"&&row.due>0&&<button type="button" className="crmCreateButton" onClick={()=>payMasterBalance(row.master.id,row.due)}>Выплатить полностью · {formatPrice(row.due)}</button>}</div></div></div>})()}
+  .crmBoard {
+    display: block !important;
+    overflow: visible !important;
+    padding-bottom: 0 !important;
+  }
+  .crmBoard .crmColumn { display: none !important; }
+  .crmBoard .crmColumn.crmMobileColumnActive {
+    display: block !important;
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .crmColumnHeader { margin-bottom: 10px; }
+  .crmColumnCards { min-height: 0 !important; padding: 10px !important; }
+  .crmOrderCard { padding: 15px !important; }
+  .crmOrderCard h3 { font-size: 18px !important; }
 
-        {selectedOrder && <div className="crmModalBackdrop" onClick={()=>setSelectedOrder(null)}><div className="crmModal" onClick={(e)=>e.stopPropagation()}>
-        <button className="crmModalClose" type="button" onClick={()=>setSelectedOrder(null)}><X size={21}/></button>
-        <div className="crmOrderNumber">ЗАКАЗ №{selectedOrder.id}</div><h2>{getVehicleName(selectedOrder.vehicle)}</h2><p className="crmModalCustomer">{getCustomerName(selectedOrder.customer)}{selectedOrder.customer?.phone && ` · ${selectedOrder.customer.phone}`}</p>
-        <div className="crmModalSection"><span className="crmModalLabel">Текущий статус</span><strong>{statusLabels[selectedOrder.status] || selectedOrder.status}</strong></div>
-        {(()=>{const steps=["new","approval","production","installation","done"];const current=Math.max(0,steps.indexOf(selectedOrder.status));return <div className="crmV25Workflow" aria-label="Этапы заказа">{steps.map((key,index)=><div key={key} className={`crmV25WorkflowStep ${selectedOrder.status==="cancelled"?"cancelled":index<current?"complete":index===current?"current":""}`}><span>{index<current?"✓":index+1}</span><small>{statusLabels[key]}</small></div>)}</div>})()}
-        {(()=>{const econ=getOrderEconomics(selectedOrder);const tasks=productionData.tasks||[];const photos=productionData.photos||[];const checks=[
-          {label:"Заявка принята",ok:!!selectedOrder.accepted_at},
-          {label:"Запись",ok:!!selectedOrder.scheduled_at},
-          {label:"Мастер",ok:!!(productionData.assigned_employee_id||selectedOrder.assigned_employee_id) && adminData.employees.some(e=>Number(e.id)===Number(productionData.assigned_employee_id||selectedOrder.assigned_employee_id)&&e.role==="master"&&e.is_active!==false)},
-          {label:"Этапы работ",ok:tasks.length>0&&tasks.every(t=>t.status==="done")},
-          {label:"Фото после",ok:photos.some(p=>p.kind==="after")},
-          ...(employee?.role!=="master"?[{label:"Оплата",ok:econ.debt<=0}]:[]),
-        ];const ready=checks.filter(x=>x.ok).length;return <div className="crmV25Readiness"><div className="crmV25ReadinessHead"><div><strong>Готовность заказа</strong><small>{ready} из {checks.length} пунктов</small></div><b>{Math.round(ready/checks.length*100)}%</b></div><div className="crmV25ReadinessBar"><i style={{width:`${ready/checks.length*100}%`}}/></div><div className="crmV25Checks">{checks.map(x=><span key={x.label} className={x.ok?"ok":"pending"}>{x.ok?"✓":"○"} {x.label}</span>)}</div></div>})()}
-        {employee?.role !== "master" && <div className="crmModalSection crmOperationalSection"><span className="crmModalLabel">Работа с заявкой</span><div className="crmOperationalRow"><div><span>Просмотр</span><strong>{selectedOrder.viewed_at?formatDate(selectedOrder.viewed_at):"Новая заявка"}</strong></div><div><span>Принята в работу</span><strong>{selectedOrder.accepted_at?formatDate(selectedOrder.accepted_at):"Ещё нет"}</strong></div>{!selectedOrder.accepted_at&&<button type="button" className="crmCreateButton" onClick={acceptOrder}>Принять в работу</button>}</div></div>}
-        {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Воронка продаж</span><div className="crmFormRow"><label>Источник заявки<select value={editingOrder.lead_source} onChange={(e)=>setEditingOrder((c)=>({...c,lead_source:e.target.value}))}>{Object.entries(leadSourceLabels).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label><label>Причина отказа<select value={editingOrder.cancellation_reason} onChange={(e)=>setEditingOrder((c)=>({...c,cancellation_reason:e.target.value}))}><option value="">Не указана</option>{Object.entries(cancellationReasonLabels).map(([key,label])=><option key={key} value={key}>{label}</option>)}</select></label></div>{selectedOrder.status!=="cancelled"&&<small className="crmDocumentsHint">Причина отказа обязательна только при отмене заказа.</small>}</div>}
-        {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Изменить статус</span><div className="crmStatusButtons">{columns.map((column)=><button key={column.key} type="button" disabled={changingStatus||savingOrder} className={selectedOrder.status===column.key?"crmStatusButton crmStatusButtonActive":"crmStatusButton"} onClick={()=>changeStatus(selectedOrder,column.key)}>{selectedOrder.status===column.key&&<CheckCircle2 size={15}/>} {column.label}</button>)}</div></div>}
-        <div className="crmModalSection"><span className="crmModalLabel">Работы</span><div className="crmModalItems">{selectedOrder.items?.map((item)=><div key={item.id} className="crmModalItem"><div><strong>{item.service_name}</strong>{item.material&&<span>{item.material}</span>}</div>{employee?.role !== "master" && <strong>{formatPrice(item.price)}</strong>}</div>)}</div></div>
-        {selectedOrder.customer_comment&&<div className="crmModalSection"><span className="crmModalLabel">Комментарий клиента</span><p>{selectedOrder.customer_comment}</p></div>}
-        {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Приоритет заказа</span><div className="crmPriorityChoices">{[["normal","Обычный"],["high","Высокий"],["urgent","Срочный"]].map(([key,label])=><button type="button" key={key} className={`crmPriorityChoice crmPriorityChoice-${key} ${editingOrder.priority===key?"crmPriorityChoiceActive":""}`} onClick={()=>setEditingOrder((c)=>({...c,priority:key}))}>{label}</button>)}</div></div>}
-        {employee?.role !== "master" && <div className="crmModalSection crmV181Booking"><span className="crmModalLabel">Запись клиента</span>{selectedOrder.requested_at ? <div className={`crmV181Request ${selectedOrder.booking_status==="reschedule_requested"?"crmV181RequestMove":""}`}><div><small>{selectedOrder.booking_status==="reschedule_requested"?"Клиент просит перенести на":"Желаемое время клиента"}</small><strong>{formatDate(selectedOrder.requested_at)}</strong><span>{selectedOrder.booking_status==="reschedule_requested"?"Запрос на перенос":"Запрос клиента"}</span></div><button type="button" disabled={savingOrder} onClick={confirmRequestedBooking}>{savingOrder?"Сохраняем...":"Принять это время"}</button></div> : <div className="crmV181NoRequest">Клиент не указывал желаемое время.</div>}<div className="crmV181Scheduled"><label><span>Подтверждённая запись</span><input className="crmEditInput" type="datetime-local" value={editingOrder.scheduled_at} onChange={(e)=>setEditingOrder((c)=>({...c,scheduled_at:e.target.value}))}/></label><button type="button" className="crmV183ProposeBooking" disabled={savingOrder||!editingOrder.scheduled_at} onClick={proposeBookingTime}>{savingOrder?"Сохраняем...":"Предложить это время"}</button><div className={`crmV181BookingState crmV181BookingState-${selectedOrder.booking_status||"none"}`}>{selectedOrder.booking_status==="confirmed"?"✓ Запись подтверждена":selectedOrder.booking_status==="scheduled"?"Ожидаем подтверждения клиента":selectedOrder.booking_status==="reschedule_requested"?"Клиент запросил перенос":selectedOrder.booking_status==="requested"?"Нужно назначить время":selectedOrder.booking_status==="cancelled"?"Запись отменена":"Запись не подтверждена"}</div></div><div className="crmV192OrderSlot"><label><span>Рабочий пост</span><select value={selectedOrder.service_bay||""} onChange={(e)=>assignServiceBay(selectedOrder,e.target.value)}><option value="">Авто</option>{Array.from({length:SERVICE_BAYS_COUNT},(_,i)=><option key={i+1} value={i+1}>Пост {i+1}</option>)}</select></label><label><span>Длительность</span><select value={Number(selectedOrder.service_duration_minutes||120)} onChange={(e)=>setServiceDuration(selectedOrder,e.target.value)}>{[30,60,90,120,180,240,360,480].map((m)=><option value={m} key={m}>{m<60?`${m} мин`:`${m/60} ч`}</option>)}</select></label></div><small className="crmDocumentsHint">Если принять время клиента — запись подтверждается сразу. Если назначить другое время — клиенту потребуется его подтвердить. Пост и длительность используются для расчёта загрузки сервиса.</small>{selectedOrder.scheduled_at&&<div className="crmV182BookingActions"><button type="button" className="crmV182CancelBooking" onClick={cancelBooking} disabled={savingOrder}>Отменить только запись</button></div>}</div>}
-        {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Итоговая стоимость</span><div className="crmPriceInputWrap"><input className="crmEditInput" type="number" min="0" step="1" value={editingOrder.final_price} onChange={(e)=>setEditingOrder((c)=>({...c,final_price:e.target.value}))} placeholder="Например, 52000"/><span>₽</span></div></div>}
-        {employee?.role !== "master" && <div className="crmModalSection"><span className="crmModalLabel">Комментарий менеджера</span><textarea className="crmEditTextarea" value={editingOrder.manager_comment} onChange={(e)=>setEditingOrder((c)=>({...c,manager_comment:e.target.value}))} placeholder="Например: клиент согласовал дополнительную защиту арок" rows={4}/></div>}
-        <div className="crmModalSection crmProductionSection">
-          <span className="crmModalLabel">Производство</span>
-          {productionLoading ? <div className="crmEmptyState">Загружаем производство...</div> : <>
-            {employee?.role !== "master" ? <label className="crmProductionAssignee">Ответственный
-              <select value={productionData.assigned_employee_id || ""} onChange={(e)=>assignEmployee(e.target.value)}>
-                <option value="">Не назначен</option>
-                {adminData.employees.filter((x)=>x.is_active).map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name || `Сотрудник #${emp.id}`}</option>)}
-              </select>
-            </label> : <div className="crmMasterNotice">Рабочий режим мастера: этапы производства, материалы и задачи.</div>}
-            <div className="crmV16Progress"><div><strong>Прогресс производства</strong><span>{productionData.tasks.length ? Math.round(productionData.tasks.filter((t)=>(t.status|| (t.is_done?"done":"todo"))==="done").length/productionData.tasks.length*100) : 0}%</span></div><div className="crmV16ProgressTrack"><i style={{width:`${productionData.tasks.length ? Math.round(productionData.tasks.filter((t)=>(t.status||(t.is_done?"done":"todo"))==="done").length/productionData.tasks.length*100) : 0}%`}}/></div></div>
-            <div className="crmProductionTasks crmV16Stages">
-              {productionData.tasks.map((task)=>{const taskStatus=task.status||(task.is_done?"done":"todo");return <div key={task.id} className={`crmV16Stage crmV16Stage-${taskStatus}`}><div className="crmV16StageHead"><div><strong>{task.title}</strong><small>{task.assignee?.display_name||"Без исполнителя"}{task.due_at?` · до ${formatDate(task.due_at)}`:""}</small></div><span>{taskStatus==="done"?"Готово":taskStatus==="in_progress"?"В работе":"Не начат"}</span></div>{task.notes&&<p>{task.notes}</p>}{employee?.role !== "manager"&&<div className="crmV16StageActions"><button type="button" className={taskStatus==="todo"?"active":""} onClick={()=>setProductionTaskStatus(task,"todo")}>Не начат</button><button type="button" className={taskStatus==="in_progress"?"active":""} onClick={()=>setProductionTaskStatus(task,"in_progress")}>В работу</button><button type="button" className={taskStatus==="done"?"active":""} onClick={()=>setProductionTaskStatus(task,"done")}>Готово</button></div>}</div>})}
-              {!productionData.tasks.length && <div className="crmEmptyState">Этапов производства пока нет</div>}
-            </div>
-            {employee?.role !== "manager" && <form className="crmProductionAdd crmV16AddStage crmV161StageForm" onSubmit={addProductionTask}>
-              <label className="crmV161StageField crmV161StageTitle"><span>Название этапа</span><input value={newTaskTitle} onChange={(e)=>setNewTaskTitle(e.target.value)} placeholder="Например: раскрой фанеры"/></label>
-              <label className="crmV161StageField"><span>Исполнитель</span><select value={productionTaskDraft.assigned_employee_id} onChange={(e)=>setProductionTaskDraft((c)=>({...c,assigned_employee_id:e.target.value}))}><option value="">Исполнитель заказа</option>{adminData.employees.filter((x)=>x.is_active&&x.role==="master").map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name}</option>)}</select></label>
-              <label className="crmV161StageField"><span>Срок этапа</span><input type="datetime-local" value={productionTaskDraft.due_at} onChange={(e)=>setProductionTaskDraft((c)=>({...c,due_at:e.target.value}))}/></label>
-              <button className="crmV161AddStageButton" type="submit" disabled={addingProductionTask}>{addingProductionTask?"Добавляем...":"Добавить этап"}</button>
-            </form>}
-            <div className="crmV16Photos"><div className="crmV16PhotoHeader"><div><strong>Фото работ</strong><small>До / процесс / после</small></div>{<div className="crmV16PhotoButtons"><label>+ До<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"before")}/></label><label>+ Процесс<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"process")}/></label><label>+ После<input type="file" accept="image/*" onChange={(e)=>uploadProductionPhoto(e,"after")}/></label></div>}</div>{uploadingProductionPhoto&&<div className="crmEmptyState">Загружаем фото...</div>}<div className="crmV16PhotoGrid">{(productionData.photos||[]).map((photo)=><a key={photo.id} href={photo.url} target="_blank" rel="noreferrer"><img src={photo.url} alt={photo.kind}/><span>{photo.kind==="before"?"До":photo.kind==="after"?"После":"Процесс"}</span></a>)}</div>{!(productionData.photos||[]).length&&!uploadingProductionPhoto&&<div className="crmEmptyState">Фото работ пока нет</div>}</div>
-            {employee?.role === "manager" && <div className="crmMasterNotice">Производство доступно менеджеру только для просмотра. Исполнение ведёт назначенный мастер.</div>}
-          </>}
-        </div>
-        <div className="crmModalSection crmProductionSection">
-          <span className="crmModalLabel">Материалы заказа</span>
-          <div className="crmOrderMaterials">
-            {productionData.materials.map((item)=><div className="crmOrderMaterial" key={item.id}><div><strong>{item.inventory_item?.name || "Материал"}</strong><span>{formatDate(item.created_at)}</span></div><strong>{item.quantity} {item.inventory_item?.unit || ""}<small>{item.unit_price != null ? ` · ${formatPrice(Number(item.quantity||0)*Number(item.unit_price||0))}` : ""}</small></strong></div>)}
-            {!productionData.materials.length && <div className="crmEmptyState">Материалы ещё не списывались</div>}
-          </div>
-          {employee?.role !== "manager" && <form className="crmMaterialAdd" onSubmit={addOrderMaterial}>
-            <select value={materialDraft.inventory_item_id} onChange={(e)=>setMaterialDraft({...materialDraft,inventory_item_id:e.target.value})}><option value="">Выберите материал</option>{adminData.inventory.map((item)=><option key={item.id} value={item.id}>{item.name} · остаток {item.quantity} {item.unit}</option>)}</select>
-            <input type="number" min="0.01" step="0.01" value={materialDraft.quantity} onChange={(e)=>setMaterialDraft({...materialDraft,quantity:e.target.value})} placeholder="Количество"/>
-            <button type="submit">Списать</button>
-          </form>}
-        </div>
-        {employee?.role !== "master" && <div className="crmModalSection crmV20Finance"><span className="crmModalLabel">Оплаты</span>{(()=>{const e=getOrderEconomics(selectedOrder);const payments=getOrderPayments(selectedOrder);return <><div className="crmV20MoneyGrid"><div><span>Стоимость заказа</span><strong>{formatPrice(e.revenue)}</strong></div><div><span>Оплачено</span><strong>{formatPrice(e.paid)}</strong></div><div className={e.debt>0?"debt":"ok"}><span>Остаток</span><strong>{formatPrice(e.debt)}</strong></div></div><div className="crmV20Payments">{payments.length?payments.map((p)=><div key={p.id}><div><strong>{formatPrice(p.amount)}</strong><span>{({cash:"Наличные",card:"Карта",transfer:"Перевод",invoice:"Счёт"})[p.method]||p.method}{p.note?` · ${p.note}`:""}</span></div><small>{formatDate(p.paid_at||p.created_at)}</small></div>):<div className="crmEmptyState">Платежей пока нет</div>}</div><form className="crmV20PaymentForm" onSubmit={addPayment}><input type="number" min="1" step="1" required placeholder="Сумма, ₽" value={paymentDraft.amount} onChange={(ev)=>setPaymentDraft({...paymentDraft,amount:ev.target.value})}/><select value={paymentDraft.method} onChange={(ev)=>setPaymentDraft({...paymentDraft,method:ev.target.value})}><option value="card">Карта</option><option value="cash">Наличные</option><option value="transfer">Перевод</option><option value="invoice">Счёт</option></select><input placeholder="Комментарий" value={paymentDraft.note} onChange={(ev)=>setPaymentDraft({...paymentDraft,note:ev.target.value})}/><button type="submit" disabled={savingPayment}>{savingPayment?"Сохраняем...":"Добавить оплату"}</button></form></>})()}</div>}
-        {employee?.role !== "master" && <div className="crmModalSection crmEconomicsSection">
-          <span className="crmModalLabel">Экономика заказа</span>
-          {(()=>{ const base=getOrderEconomics(selectedOrder); const materialCost=productionData.materials.reduce((sum,item)=>sum+Number(item.quantity||0)*Number(item.unit_price||0),0); const laborCost=Number(laborCostDraft||0); const cost=materialCost+laborCost; const profit=base.revenue-cost; const margin=base.revenue>0?(profit/base.revenue)*100:0; return <>
-            <div className="crmEconomicsGrid">
-              <div><span>Выручка</span><strong>{formatPrice(base.revenue)}</strong></div>
-              <div><span>Материалы</span><strong>{formatPrice(materialCost)}</strong></div>
-              <div><span>Труд</span><strong>{formatPrice(laborCost)}</strong></div>
-              <div><span>Начислено мастеру</span><strong>{formatPrice(Number(masterPayDraft||0))}</strong></div>
-              <div><span>Себестоимость</span><strong>{formatPrice(cost)}</strong></div>
-              <div className={profit<0?"crmEconomicsNegative":"crmEconomicsPositive"}><span>Валовая прибыль</span><strong>{formatPrice(profit)}</strong></div>
-              <div><span>Маржа</span><strong>{margin.toFixed(1)}%</strong></div>
-            </div>
-            {employee?.role === "admin" && <div className="crmLaborCostEditor"><label>Фактическая стоимость труда, ₽<input type="number" min="0" step="1" value={laborCostDraft} onChange={(e)=>setLaborCostDraft(e.target.value)}/></label><label>Начисление мастеру, ₽<input type="number" min="0" step="1" value={masterPayDraft} onChange={(e)=>setMasterPayDraft(e.target.value)}/></label><button type="button" disabled={savingEconomics} onClick={saveOrderEconomics}>{savingEconomics?"Сохраняем...":"Сохранить экономику"}</button></div>}
-            {employee?.role === "manager" && <div className="crmMasterNotice">Экономика доступна для просмотра. Фактическую стоимость труда изменяет администратор.</div>}
-          </>; })()}
-        </div>}
-        {saveMessage&&<div className="crmSaveSuccess"><CheckCircle2 size={17}/>{saveMessage}</div>}
-        {employee?.role !== "master" && <div className="crmModalTotal"><span>Стоимость</span><strong>{formatPrice(orderAmount(selectedOrder))}</strong></div>}
-        <div className="crmModalDate"><Clock3 size={16}/>Создан {formatDate(selectedOrder.created_at)}</div>
-        {employee?.role !== "master" && <div className="crmModalSection crmDocumentsSection"><span className="crmModalLabel">Документы</span><p className="crmDocumentsHint">Документ откроется в печатном виде. В окне печати можно выбрать «Сохранить как PDF».</p><div className="crmDocumentActions"><button type="button" onClick={()=>printOrderDocument("quote")}><FileText size={17}/>Коммерческое предложение</button><button type="button" onClick={()=>sendOrderDocumentToTelegram("quote")} disabled={!!sendingDocument}><Send size={17}/>{sendingDocument==="quote"?"Отправляем...":"КП → Telegram"}</button><button type="button" onClick={()=>printOrderDocument("work_order")}><Printer size={17}/>Заказ-наряд / PDF</button><button type="button" onClick={()=>sendOrderDocumentToTelegram("work_order")} disabled={!!sendingDocument}><Send size={17}/>{sendingDocument==="work_order"?"Отправляем...":"Заказ-наряд → Telegram"}</button></div></div>}<div className="crmModalSection crmTasksSection"><span className="crmModalLabel">Внутренние задачи</span><div className="crmTaskList">{orderTasks.length?orderTasks.map((task)=><button type="button" key={task.id} className={`crmTaskRow ${task.is_done?"crmTaskDone":""} ${!task.is_done&&task.due_at&&new Date(task.due_at)<new Date()?"crmTaskOverdue":""}`} onClick={()=>toggleCrmTask(task)}><span>{task.is_done?"✓":"○"}</span><div><strong>{task.title}</strong><small>{task.assignee?.display_name||"Без ответственного"}{task.due_at?` · до ${formatDate(task.due_at)}`:""}</small></div></button>):<div className="crmEmptyState">Задач пока нет</div>}</div><form className="crmTaskForm" onSubmit={addCrmTask}><input required value={taskDraft.title} onChange={(e)=>setTaskDraft({...taskDraft,title:e.target.value})} placeholder="Например: позвонить клиенту"/><input type="datetime-local" value={taskDraft.due_at} onChange={(e)=>setTaskDraft({...taskDraft,due_at:e.target.value})}/>{employee?.role !== "master" ? <select value={taskDraft.assigned_employee_id} onChange={(e)=>setTaskDraft({...taskDraft,assigned_employee_id:e.target.value})}><option value="">Я</option>{adminData.employees.filter((x)=>x.is_active).map((emp)=><option key={emp.id} value={emp.id}>{emp.display_name}</option>)}</select> : <input type="hidden" value="" />}<button type="submit">Добавить</button></form></div><div className="crmModalSection"><span className="crmModalLabel">История заказа</span><div className="crmHistoryList">{orderHistory.length ? orderHistory.map((event)=><div className="crmHistoryItem" key={event.id}><History size={16}/><div><strong>{event.description}</strong><span>{formatDate(event.created_at)}{event.employee?.display_name?` · ${event.employee.display_name}`:""}</span></div></div>) : <div className="crmEmptyState">История появится после изменений в версии v4</div>}</div></div>{employee?.role !== "master" && <div className="crmModalActions"><button type="button" className="crmSaveButton" disabled={savingOrder||changingStatus} onClick={saveOrderChanges}>{savingOrder?"Сохраняем...":"Сохранить изменения"}</button><button type="button" className="crmCancelButton" disabled={savingOrder||changingStatus||selectedOrder.status==="cancelled"} onClick={cancelOrder}>{selectedOrder.status==="cancelled"?"Заказ отменён":"Отменить заказ"}</button></div>}
-      </div></div>}
-    </div>
-  );
+  .crmModalBackdrop {
+    padding: 0 !important;
+    align-items: flex-end !important;
+    overflow: hidden !important;
+  }
+  .crmModal {
+    width: 100vw !important;
+    max-width: none !important;
+    height: 94dvh !important;
+    max-height: 94dvh !important;
+    overflow-y: auto !important;
+    overscroll-behavior: contain;
+    border-radius: 20px 20px 0 0 !important;
+    padding: 20px 16px calc(118px + env(safe-area-inset-bottom)) !important;
+    scroll-padding-top: 84px;
+  }
+  .crmModalClose {
+    position: sticky !important;
+    top: 0 !important;
+    z-index: 20 !important;
+    float: right;
+    width: 42px !important;
+    height: 42px !important;
+    margin: -4px -2px 4px 10px !important;
+    border-radius: 12px !important;
+    background: #eef3f8 !important;
+    color: #1672f3 !important;
+    box-shadow: 0 2px 10px rgba(15,35,65,.08);
+  }
+  .crmOrderNumber { clear: both; padding-top: 2px; }
+  .crmModal h2 { font-size: 25px !important; line-height: 1.12; margin: 8px 0 4px !important; }
+  .crmModalCustomer { font-size: 17px !important; margin-bottom: 18px !important; }
+  .crmModalSection { margin-top: 18px !important; }
+  .crmModalLabel { margin-bottom: 9px !important; font-size: 12px !important; }
+
+  .crmStatusButtons,
+  .crmPriorityChoices { gap: 7px !important; }
+  .crmStatusButton,
+  .crmPriorityChoice {
+    min-height: 42px !important;
+    padding: 9px 11px !important;
+    border-radius: 11px !important;
+    font-size: 13px !important;
+  }
+  .crmPriorityChoices { grid-template-columns: repeat(3, minmax(0,1fr)) !important; }
+
+  .crmModal select,
+  .crmModal input,
+  .crmModal textarea,
+  .crmEditInput,
+  .crmEditTextarea,
+  .crmProductionAssignee select,
+  .crmProductionAdd input,
+  .crmMaterialWriteoff select,
+  .crmMaterialWriteoff input,
+  .crmTaskComposer input,
+  .crmTaskComposer select {
+    width: 100% !important;
+    max-width: 100% !important;
+    min-height: 46px;
+    box-sizing: border-box;
+    border: 1px solid #dce3ed !important;
+    border-radius: 12px !important;
+    background: #fff !important;
+    color: #17233a !important;
+    font-size: 16px !important;
+  }
+  .crmModal textarea,
+  .crmEditTextarea { min-height: 96px !important; }
+  .crmProductionAdd,
+  .crmMaterialWriteoff,
+  .crmTaskComposer { grid-template-columns: 1fr !important; display: grid !important; gap: 8px !important; }
+  .crmProductionAdd button,
+  .crmMaterialWriteoff button,
+  .crmTaskComposer button { width: 100% !important; min-height: 46px !important; }
+
+  .crmProductionSection .crmEmptyState {
+    min-height: 0 !important;
+    padding: 14px 8px !important;
+  }
+  .crmEconomicsGrid { grid-template-columns: repeat(2,minmax(0,1fr)) !important; gap: 8px !important; }
+  .crmEconomicsCard { min-width: 0 !important; padding: 13px !important; }
+  .crmDocumentActions { grid-template-columns: 1fr !important; gap: 8px !important; }
+  .crmDocumentActions button,
+  .crmDocumentButton { width: 100% !important; justify-content: flex-start !important; min-height: 48px !important; }
+  .crmModalActions { position: relative; z-index: 2; }
+}
+
+/* ===== GarageFlow v14.4: mobile calendar + warehouse + settings ===== */
+@media (max-width: 760px) {
+  /* Calendar */
+  .crmCalendarV14 { margin-top: 14px !important; }
+  .crmCalendarV14 .crmCalendarSummary {
+    grid-template-columns: repeat(2,minmax(0,1fr)) !important;
+    gap: 8px !important;
+    margin-bottom: 12px !important;
+  }
+  .crmCalendarV14 .crmCalendarSummary > div {
+    min-width: 0;
+    padding: 12px !important;
+    border-radius: 12px !important;
+  }
+  .crmCalendarV14 .crmCalendarSummary span { font-size: 11px !important; }
+  .crmCalendarV14 .crmCalendarSummary strong { font-size: 20px !important; }
+  .crmCalendarControlBar {
+    grid-template-columns: minmax(0,1fr) auto !important;
+    margin-bottom: 12px !important;
+  }
+  .crmCalendarViewSwitch { min-width: 0; }
+  .crmCalendarViewSwitch button,
+  .crmTodayButton { min-height: 40px; }
+  .crmMonthToolbar { margin: 8px 0 12px !important; }
+  .crmMonthToolbar h2 { font-size: 18px !important; }
+  .crmCalendarV14 .crmWeekdays,
+  .crmCalendarV14 .crmMonthGrid {
+    min-width: 0 !important;
+    width: 100% !important;
+  }
+  .crmCalendarV14 .crmMonthDay {
+    min-height: 62px !important;
+    padding: 6px 4px !important;
+  }
+  .crmCalendarV14 .crmMonthEvent { display: none !important; }
+  .crmCalendarV14 .crmMonthDay small { display: none !important; }
+  .crmCalendarV14 .crmMonthNumber {
+    height: 100%;
+    align-items: flex-start !important;
+    font-size: 12px !important;
+  }
+  .crmCalendarV14 .crmMonthDayBusy { background: #f3f8ff !important; }
+  .crmCalendarV14 .crmMonthDaySelected {
+    outline: 2px solid #1672f3 !important;
+    outline-offset: -1px;
+  }
+  .crmDayAgenda {
+    margin-top: 14px !important;
+    padding: 14px !important;
+    border-radius: 15px !important;
+    background: #fff;
+    border: 1px solid #e3e9f1;
+  }
+  .crmDayAgenda .crmPanelHeader { margin-bottom: 8px !important; }
+  .crmDayAgenda .crmPanelHeader h2 { font-size: 16px !important; }
+  .crmDayAgenda .crmListRow { padding: 12px 4px !important; gap: 10px !important; }
+  .crmDayAgenda .crmCalendarTime { min-width: 46px !important; width: 46px !important; }
+
+  /* Warehouse */
+  .crmDataSection .crmV4Grid { margin-top: 12px !important; gap: 12px !important; }
+  .crmDataSection .crmPanel {
+    padding: 14px !important;
+    border-radius: 15px !important;
+    box-shadow: none !important;
+    border: 1px solid #e4e9f0;
+  }
+  .crmInventoryList { gap: 9px !important; }
+  .crmInventoryRow {
+    grid-template-columns: minmax(0,1fr) auto !important;
+    gap: 8px 12px !important;
+    padding: 13px !important;
+    border-radius: 12px !important;
+  }
+  .crmInventoryRow > div:first-child { grid-column: 1 / -1; }
+  .crmInventoryRow > div:not(:first-child) {
+    background: #f6f8fb;
+    border-radius: 9px;
+    padding: 8px 10px;
+  }
+  .crmInventoryLow > div:not(:first-child) { background: #fff0f0; }
+  .crmV4Form label { margin-top: 10px !important; }
+  .crmV4Form input {
+    min-height: 46px;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+  .crmV4Form .crmCreateButton { min-height: 46px; margin-top: 12px; }
+
+  /* Settings */
+  .crmServiceEditorList { gap: 10px !important; }
+  .crmServiceEditor { padding: 12px !important; border-radius: 12px !important; }
+  .crmServiceEditorFields { gap: 9px !important; }
+  .crmServiceEditorFields input,
+  .crmNewServiceForm input,
+  .crmCompanySettings input,
+  .crmCompanySettings textarea,
+  .crmEmployeeRole {
+    min-height: 46px;
+    font-size: 16px !important;
+    border-radius: 12px !important;
+  }
+  .crmServiceEditorActions { margin-top: 10px !important; }
+  .crmServiceToggle { min-height: 42px; }
+  .crmNotifySettings { gap: 8px !important; margin: 12px 0 !important; }
+  .crmNotifySettings label { padding: 12px !important; border-radius: 12px !important; }
+  .crmNotifySettings strong { font-size: 13px !important; }
+  .crmNotifySettings small { font-size: 11px !important; }
+  .crmCompanySettings { gap: 9px !important; }
+  .crmCompanySettings > label { font-size: 12px !important; }
+  .crmCompanySettings textarea { min-height: 88px; }
+  .crmSettingsList { gap: 9px !important; }
+  .crmEmployeeAdminRow {
+    display: grid !important;
+    grid-template-columns: 1fr !important;
+    padding: 12px !important;
+    gap: 9px !important;
+  }
+  .crmEmployeeRole,
+  .crmEmployeeTelegram,
+  .crmEmployeeActive { width: 100% !important; box-sizing: border-box; }
+  .crmEmployeeActive {
+    min-height: 42px;
+    padding: 0 10px;
+    border: 1px solid #e4e9f0;
+    border-radius: 11px;
+  }
+  .crmEmployeeTelegram { min-height: 44px; }
+  .crmHint { font-size: 11px !important; }
+
+  /* Keep content above the fixed mobile navigation */
+  .crmMain { padding-bottom: calc(150px + env(safe-area-inset-bottom)) !important; }
+}
+
+@media (max-width: 380px) {
+  .crmCalendarV14 .crmMonthDay { min-height: 56px !important; }
+  .crmCalendarControlBar { grid-template-columns: 1fr !important; }
+  .crmTodayButton { width: 100%; }
+}
+\n\n/* ===== GarageFlow v15: product operations ===== */\n.crmMyTasksPanel { margin-top: 18px; }\n.crmV15TaskList { display: grid; gap: 8px; }\n.crmV15Task { width:100%; border:1px solid #e7ebf1; background:#fff; border-radius:12px; padding:12px 14px; display:flex; align-items:center; gap:11px; text-align:left; color:inherit; cursor:pointer; }\n.crmV15Task:hover { background:#f8fafc; }\n.crmV15TaskOverdue { border-color:#f0c6c6; background:#fff8f8; }\n.crmV15TaskCheck { width:24px; height:24px; flex:0 0 24px; border-radius:50%; display:grid; place-items:center; background:#eef3f8; font-weight:800; }\n.crmV15Task > div { flex:1; min-width:0; }\n.crmV15Task strong,.crmV15Task small { display:block; }\n.crmV15Task strong { font-size:13px; }\n.crmV15Task small { margin-top:3px; color:#8792a3; font-size:11px; }\n.crmLaunchPanel { margin-bottom:18px; }\n.crmLaunchScore { min-width:54px; height:36px; padding:0 12px; border-radius:18px; display:grid; place-items:center; background:#eef4ff; color:#1769d8; font-size:14px; }\n.crmLaunchChecklist { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:9px; margin:14px 0; }\n.crmLaunchItem { display:flex; align-items:center; gap:8px; border:1px solid #e6eaf0; border-radius:11px; padding:11px 12px; color:#7b8594; }\n.crmLaunchItem span { font-size:17px; font-weight:800; }\n.crmLaunchItem strong { font-size:12px; }\n.crmLaunchItemDone { background:#f3faf5; border-color:#cfe8d5; color:#2d7a43; }\n@media (max-width:700px) {\n  .crmLaunchChecklist { grid-template-columns:1fr; }\n  .crmV15Task { padding:11px; }\n  .crmMyTasksPanel { margin-top:14px; }\n}\n
+/* ===== GarageFlow v15.1: mobile employee profile + logout ===== */
+.crmTopbarActions{display:flex;align-items:center;gap:8px}
+.crmMobileProfileButton{display:none}
+.crmMobileProfilePage{max-width:560px;margin:0 auto}
+.crmProfileCard{display:flex;align-items:center;gap:14px;padding:18px}
+.crmProfileAvatar{width:54px;height:54px;flex:0 0 54px;border-radius:50%;display:grid;place-items:center;background:#eef4ff;color:#1769d8}
+.crmProfileIdentity{min-width:0}.crmProfileIdentity h2{margin:0;font-size:18px}.crmProfileIdentity p{margin:4px 0 0;color:#66748a;font-weight:700}.crmProfileIdentity span{display:block;margin-top:4px;color:#8a95a5;font-size:12px;overflow-wrap:anywhere}
+.crmMobileLogoutButton{width:100%;margin-top:12px;border:1px solid #efcaca;background:#fff5f5;color:#b83232;border-radius:12px;padding:13px 15px;display:flex;align-items:center;justify-content:center;gap:8px;font:inherit;font-weight:800;cursor:pointer}
+.crmMobileLogoutHint{text-align:center;color:#8793a5;font-size:11px;line-height:1.5;margin:10px 12px 0}
+@media(max-width:700px){
+  .crmTopbarActions{width:100%;display:grid;grid-template-columns:minmax(0,1fr) auto;gap:8px}
+  .crmMobileProfileButton{display:flex;min-width:0;align-items:center;justify-content:flex-start;gap:7px;border:1px solid #dfe5ed;background:#fff;color:#40506a;border-radius:10px;padding:10px 12px;font:inherit;font-weight:700;cursor:pointer}
+  .crmMobileProfileButton span{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .crmTopbarActions .crmRefresh{width:auto!important;min-width:44px;padding:10px 12px}
+  .crmProfileCard{margin-top:4px}
+}
+\n/* ===== GarageFlow v16: production control ===== */
+.crmV16Progress{padding:12px 0}.crmV16Progress>div:first-child{display:flex;justify-content:space-between;gap:12px;font-size:12px}.crmV16ProgressTrack{height:8px;background:#e8edf4;border-radius:99px;overflow:hidden;margin-top:8px}.crmV16ProgressTrack i{display:block;height:100%;background:#1877f2;border-radius:99px;transition:width .2s}.crmV16Stages{display:grid;gap:9px}.crmV16Stage{border:1px solid #e2e7ee;border-radius:13px;padding:12px;background:#fff}.crmV16Stage-in_progress{border-color:#b7d6ff;background:#f7fbff}.crmV16Stage-done{border-color:#bfe3c8;background:#f7fcf8}.crmV16StageHead{display:flex;align-items:flex-start;justify-content:space-between;gap:10px}.crmV16StageHead strong,.crmV16StageHead small{display:block}.crmV16StageHead small{font-size:11px;color:#8995a7;margin-top:4px}.crmV16StageHead>span{font-size:10px;font-weight:800;white-space:nowrap;padding:5px 8px;border-radius:999px;background:#edf1f6;color:#66748a}.crmV16Stage-in_progress .crmV16StageHead>span{background:#e6f1ff;color:#1769d8}.crmV16Stage-done .crmV16StageHead>span{background:#e5f6e9;color:#277b3d}.crmV16Stage p{font-size:12px;color:#657287;margin:9px 0 0}.crmV16StageActions{display:grid;grid-template-columns:repeat(3,1fr);gap:6px;margin-top:10px}.crmV16StageActions button{border:1px solid #dce3ec;background:#fff;border-radius:9px;padding:8px 6px;font-size:10px;font-weight:800;color:#647187}.crmV16StageActions button.active{border-color:#1877f2;background:#edf5ff;color:#1769d8}.crmV16AddStage{display:grid!important;grid-template-columns:2fr 1fr 1fr auto!important;gap:8px!important}.crmV16Photos{margin-top:16px;border-top:1px solid #edf0f4;padding-top:14px}.crmV16PhotoHeader{display:flex;justify-content:space-between;gap:12px;align-items:flex-start}.crmV16PhotoHeader strong,.crmV16PhotoHeader small{display:block}.crmV16PhotoHeader small{font-size:11px;color:#8a95a5;margin-top:3px}.crmV16PhotoButtons{display:flex;gap:6px;flex-wrap:wrap;justify-content:flex-end}.crmV16PhotoButtons label{cursor:pointer;border:1px solid #dce3ec;border-radius:9px;padding:7px 9px;font-size:10px;font-weight:800;color:#1769d8;background:#fff}.crmV16PhotoButtons input{display:none}.crmV16PhotoGrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px;margin-top:10px}.crmV16PhotoGrid a{position:relative;display:block;aspect-ratio:4/3;border-radius:10px;overflow:hidden;background:#eef2f6}.crmV16PhotoGrid img{width:100%;height:100%;object-fit:cover;display:block}.crmV16PhotoGrid span{position:absolute;left:6px;bottom:6px;background:rgba(15,29,49,.78);color:#fff;border-radius:7px;padding:4px 6px;font-size:9px;font-weight:800}
+@media(max-width:700px){.crmV16AddStage{grid-template-columns:1fr!important}.crmV16StageActions{grid-template-columns:1fr 1fr 1fr}.crmV16PhotoHeader{display:block}.crmV16PhotoButtons{justify-content:flex-start;margin-top:9px}.crmV16PhotoGrid{grid-template-columns:repeat(2,minmax(0,1fr))}.crmV16StageHead{display:block}.crmV16StageHead>span{display:inline-block;margin-top:7px}}
+
+/* ===== GarageFlow v16.1: wider order panel + clearer stage form ===== */
+@media (min-width: 701px) {
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) {
+    width: min(760px, 72vw) !important;
+    max-width: 760px !important;
+    overflow-x: hidden !important;
+  }
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) .crmModalSection,
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) form,
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) input,
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) select,
+  .crmModalBackdrop > .crmModal:not(.crmCreateOrderModal):not(.crmEntityModal) textarea {
+    min-width: 0;
+    box-sizing: border-box;
+  }
+}
+.crmV161StageForm {
+  margin-top: 14px;
+  padding: 14px;
+  border: 1px solid #e3e8ef;
+  border-radius: 14px;
+  background: #f8fafc;
+  align-items: end;
+}
+.crmV161StageField { min-width: 0; display: grid; gap: 6px; }
+.crmV161StageField > span { font-size: 11px; font-weight: 800; color: #7e8ba0; text-transform: uppercase; letter-spacing: .03em; }
+.crmV161StageField input,
+.crmV161StageField select { width: 100%; min-width: 0; box-sizing: border-box; border: 1px solid #dfe3ea; border-radius: 10px; padding: 10px 12px; background: #fff; font: inherit; }
+.crmV161AddStageButton { min-height: 42px; white-space: nowrap; }
+@media (max-width: 700px) {
+  .crmV161StageForm { display: grid !important; grid-template-columns: 1fr !important; gap: 11px !important; padding: 12px !important; }
+  .crmV161StageField { display: grid !important; width: 100% !important; }
+  .crmV161StageField > span { display: block !important; }
+  .crmV161StageField input,
+  .crmV161StageField select { display: block !important; width: 100% !important; min-height: 48px !important; font-size: 16px !important; }
+  .crmV161AddStageButton { display: block !important; width: 100% !important; min-height: 50px !important; }
+}
+
+
+/* ===== GarageFlow v18.1: booking request in CRM ===== */
+.crmV181Booking{display:grid;gap:12px}.crmV181Request{display:flex;align-items:center;justify-content:space-between;gap:14px;padding:14px;border:1px solid #b9d7ff;background:#f3f8ff;border-radius:14px}.crmV181RequestMove{border-color:#f0c27b;background:#fff9ef}.crmV181Request>div{display:grid;gap:3px}.crmV181Request small{color:#77869b;font-size:11px}.crmV181Request strong{font-size:18px;color:#10213d}.crmV181Request span{font-size:11px;font-weight:800;color:#1877f2}.crmV181RequestMove span{color:#a46500}.crmV181Request button{border:0;border-radius:10px;background:#1877f2;color:#fff;padding:11px 14px;font-weight:800;white-space:nowrap}.crmV181NoRequest{padding:12px 14px;border-radius:12px;background:#f6f8fb;color:#7d899a}.crmV181Scheduled{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:12px;align-items:end}.crmV181Scheduled label{display:grid;gap:6px}.crmV181Scheduled label>span{font-size:11px;font-weight:800;color:#7e8ba0;text-transform:uppercase}.crmV181BookingState{padding:11px 12px;border-radius:10px;background:#f1f4f8;color:#68768a;font-size:11px;font-weight:800}.crmV181BookingState-confirmed{background:#eaf8ee;color:#24743a}.crmV181BookingState-scheduled{background:#eef6ff;color:#1769d8}.crmV181BookingState-reschedule_requested{background:#fff5e5;color:#9a6200}.crmV181BookingState-requested{background:#fff5e5;color:#9a6200}@media(max-width:700px){.crmV181Request{display:grid}.crmV181Request button{width:100%;min-height:46px}.crmV181Scheduled{grid-template-columns:1fr}.crmV181BookingState{font-size:12px}}
+
+/* GarageFlow v18.2 booking states */
+.crmV182BookingActions{display:flex;gap:10px;margin-top:12px;flex-wrap:wrap}.crmV182CancelBooking{border:1px solid #ef4444;background:#fff;color:#b91c1c;border-radius:12px;padding:10px 14px;font-weight:700;cursor:pointer}.crmBooking-confirmed{box-shadow:inset 3px 0 0 #22c55e}.crmBooking-scheduled{box-shadow:inset 3px 0 0 #f59e0b}.crmBooking-reschedule_requested{box-shadow:inset 3px 0 0 #ef4444}.crmBooking-cancelled{opacity:.55;text-decoration:line-through}@media(max-width:760px){.crmV182BookingActions,.crmV182BookingActions button{width:100%}}
+
+
+/* GarageFlow v18.3 — booking quick action */
+.crmV183ProposeBooking{min-height:46px;padding:0 18px;border:0;border-radius:14px;background:#1677ff;color:#fff;font:inherit;font-weight:800;cursor:pointer;white-space:nowrap}
+.crmV183ProposeBooking:disabled{opacity:.55;cursor:not-allowed}
+@media(max-width:760px){.crmV181Scheduled{grid-template-columns:1fr!important}.crmV183ProposeBooking{width:100%;min-height:52px}}
+
+
+/* GarageFlow v18.6 — live CRM + reschedule attention */
+.crmLiveState{font-size:12px;font-weight:800;color:#7b8798;white-space:nowrap}.crmLiveState-live{color:#159447}.crmLiveState-fallback{color:#b36a00}.crmMoveBadge{display:inline-flex;margin-left:7px;padding:3px 7px;border-radius:999px;background:#fff0d9;color:#a35f00;font-size:9px;font-weight:900;vertical-align:middle}.crmOrderCard:has(.crmMoveBadge){border-color:#f1bd69;box-shadow:0 0 0 2px rgba(245,158,11,.08)}
+@media(max-width:760px){.crmLiveState{font-size:10px}.crmMoveBadge{display:inline-flex;margin-top:4px;margin-left:5px}}
+
+/* GarageFlow v19 — operational center */
+.crmV19Alerts{margin-bottom:18px}.crmV19AlertCount{display:flex;align-items:center;gap:8px;padding:8px 12px;border-radius:14px;background:#eef5ff;color:#1672f3}.crmV19AlertList{display:grid;gap:8px}.crmV19Alert{width:100%;display:grid;grid-template-columns:38px 1fr auto;align-items:center;gap:12px;text-align:left;border:1px solid #e5eaf1;background:#fff;border-radius:16px;padding:12px 14px;color:inherit}.crmV19AlertIcon{display:grid;place-items:center;width:36px;height:36px;border-radius:12px;background:#eef5ff;color:#1672f3;font-weight:900;font-size:18px}.crmV19Alert div{display:grid;gap:3px}.crmV19Alert small{color:#8793a6}.crmV19Alert-move .crmV19AlertIcon{background:#fff4df;color:#c47700}.crmV19Alert-task .crmV19AlertIcon{background:#fff0f0;color:#c63f3f}.crmV19OpsSwitch{display:inline-flex;gap:4px;padding:4px;background:#eef2f7;border-radius:14px;margin:0 0 16px}.crmV19OpsSwitch button{display:flex;align-items:center;gap:6px;border:0;background:transparent;border-radius:11px;padding:9px 14px;font-weight:700;color:#6d7b90}.crmV19OpsSwitch button.active{background:#fff;color:#1672f3;box-shadow:0 2px 8px rgba(20,35,60,.08)}.crmV19Workload{display:grid;gap:16px;margin-bottom:20px}.crmV19Capacity{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.crmV19Capacity>div{border:1px solid #e5eaf1;background:#fff;border-radius:16px;padding:14px;display:grid;gap:5px}.crmV19Capacity span{font-size:12px;color:#8793a6}.crmV19Capacity strong{font-size:24px}.crmV19LoadGrid{display:grid;grid-template-columns:repeat(7,minmax(150px,1fr));gap:8px;overflow-x:auto;padding-bottom:4px}.crmV19LoadDay{border:1px solid #e5eaf1;background:#fff;border-radius:16px;padding:10px;min-height:170px}.crmV19LoadHead{display:flex;justify-content:space-between;gap:8px;align-items:flex-start;padding-bottom:8px;border-bottom:1px solid #edf0f4}.crmV19LoadHead div{display:grid}.crmV19LoadHead span,.crmV19LoadDay small{font-size:11px;color:#8793a6}.crmV19LoadHead b,.crmV19MasterRow>b{border-radius:10px;background:#e9f8ef;color:#188754;padding:5px 7px}.crmV19LoadHead b.busy,.crmV19MasterRow>b.busy{background:#fff4df;color:#b56b00}.crmV19LoadHead b.danger,.crmV19MasterRow>b.danger{background:#fff0f0;color:#c63f3f}.crmV19LoadDay>button{width:100%;border:0;background:#f7f9fc;border-radius:10px;margin-top:7px;padding:8px;display:grid;grid-template-columns:auto 1fr;gap:8px;text-align:left;color:inherit}.crmV19LoadDay time{font-weight:800;color:#1672f3}.crmV19LoadDay button span{display:grid;min-width:0}.crmV19LoadDay button strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV19LoadDay em{display:block;text-align:center;color:#a0aabc;font-style:normal;padding:28px 0}.crmV19Conflict{display:flex;align-items:flex-start;gap:6px;margin-top:8px;padding:8px;border-radius:10px;background:#fff0f0;color:#b33131;font-size:11px;font-weight:700}.crmV19MasterLoad{border:1px solid #e5eaf1;background:#fff;border-radius:18px;padding:16px}.crmV19MasterLoad h3{margin:0 0 12px}.crmV19MasterLoad>div{display:grid;grid-template-columns:repeat(auto-fit,minmax(210px,1fr));gap:8px}.crmV19MasterRow{display:flex;justify-content:space-between;align-items:center;padding:11px 12px;background:#f7f9fc;border-radius:12px}.crmV19MasterRow span{display:grid}.crmV19MasterRow small{color:#8793a6;margin-top:2px}
+@media(max-width:760px){.crmV19Capacity{grid-template-columns:repeat(2,minmax(0,1fr))}.crmV19LoadGrid{grid-template-columns:repeat(7,170px)}.crmV19Alerts{margin-bottom:12px}.crmV19Alert{grid-template-columns:34px 1fr auto;padding:11px}.crmV19OpsSwitch{display:grid;grid-template-columns:1fr 1fr;width:100%}.crmV19OpsSwitch button{justify-content:center}.crmV19MasterLoad>div{grid-template-columns:1fr}}
+
+/* GarageFlow v19.1 — workshop timeline */
+.crmV191Legend{display:flex;align-items:center;gap:14px;flex-wrap:wrap;padding:10px 12px;background:#fff;border:1px solid #e5eaf1;border-radius:14px}.crmV191Legend span{display:flex;align-items:center;gap:6px;font-size:12px;font-weight:700}.crmV191Legend i{width:10px;height:10px;border-radius:3px;background:#e9eef6}.crmV191Legend i.busy{background:#dbeaff}.crmV191Legend i.danger{background:#ffe1e1}.crmV191Legend small{color:#8793a6;margin-left:auto}.crmV191Timeline{display:grid;gap:12px}.crmV191Day{background:#fff;border:1px solid #e5eaf1;border-radius:18px;padding:12px;overflow:hidden}.crmV191Day.hasConflict{border-color:#efb6b6}.crmV191Scale{margin:10px 0 4px 82px;display:flex;justify-content:space-between;color:#9aa5b5;font-size:10px}.crmV191Bay{display:grid;grid-template-columns:72px 1fr;gap:10px;align-items:center;margin-top:7px}.crmV191BayName{font-size:12px;font-weight:800;color:#5f6e82}.crmV191Track{height:50px;position:relative;border-radius:10px;background:repeating-linear-gradient(to right,#f5f7fa 0,#f5f7fa calc(9.09% - 1px),#e4e9f0 calc(9.09% - 1px),#e4e9f0 9.09%);overflow:hidden}.crmV191Booking{position:absolute;top:5px;height:40px;min-width:34px;border:1px solid #b9d4ff;background:#eaf3ff;color:#155db8;border-radius:8px;padding:4px 6px;display:grid;text-align:left;overflow:hidden;cursor:pointer}.crmV191Booking strong{font-size:10px}.crmV191Booking span{font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV191Booking.conflict{background:#ffe7e7;border-color:#ef9d9d;color:#a62d2d}.crmV191Assignments{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:6px;margin-top:10px}.crmV191Assignments label{display:flex;align-items:center;justify-content:space-between;gap:8px;background:#f7f9fc;border-radius:10px;padding:7px 9px}.crmV191Assignments label span{font-size:11px;font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV191Assignments select{border:1px solid #dfe5ed;border-radius:8px;background:#fff;padding:5px 7px;font-size:11px}.crmV191Day .crmV19Conflict{margin-left:82px}
+@media(max-width:760px){.crmV191Legend small{width:100%;margin-left:0}.crmV191Day{min-width:680px}.crmV191Timeline{overflow-x:auto}.crmV191Assignments{grid-template-columns:1fr}}
+
+/* GarageFlow v19.2 — operational planner polish */
+.crmV191Booking.outside{background:#fff4df;border-color:#efb65c;color:#9a5a00;box-shadow:inset 0 0 0 1px rgba(239,182,92,.25)}
+.crmV192Outside{display:flex;align-items:center;gap:7px;margin:9px 0 0 82px;padding:8px 10px;border-radius:10px;background:#fff7e8;color:#9a6200;font-size:11px;font-weight:800}
+.crmV191Assignments{grid-template-columns:repeat(auto-fit,minmax(360px,1fr))}
+.crmV192Assignment{display:grid;grid-template-columns:minmax(140px,1fr) auto auto;gap:8px;align-items:end;background:#f7f9fc;border-radius:12px;padding:8px}
+.crmV192Assignment>button{border:0;background:transparent;text-align:left;display:grid;gap:2px;min-width:0;color:inherit;padding:4px}
+.crmV192Assignment>button strong{font-size:11px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV192Assignment>button small{font-size:10px;color:#8793a6}
+.crmV192Assignment label{display:grid!important;gap:3px!important;background:transparent!important;padding:0!important;font-size:9px;color:#8793a6}.crmV192Assignment select{min-width:92px}
+.crmV192OrderSlot{display:grid;grid-template-columns:1fr 1fr;gap:10px;margin-top:10px}.crmV192OrderSlot label{display:grid;gap:6px}.crmV192OrderSlot label span{font-size:12px;font-weight:700;color:#6f7d90}.crmV192OrderSlot select{width:100%;border:1px solid #dfe5ed;border-radius:10px;background:#fff;padding:10px}
+@media(max-width:760px){.crmV191Day{min-width:720px}.crmV191Booking{min-width:42px}.crmV192Assignment{grid-template-columns:minmax(180px,1fr) 105px 115px}.crmV192Outside{margin-left:82px}.crmV192OrderSlot{grid-template-columns:1fr}}
+
+/* GarageFlow v20 finance */
+.crmV20MoneyGrid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:10px 0 14px}.crmV20MoneyGrid>div{padding:12px;border:1px solid #e5eaf2;border-radius:12px;background:#f8fafc;display:flex;flex-direction:column;gap:5px}.crmV20MoneyGrid span{font-size:12px;color:#7b879b}.crmV20MoneyGrid strong{font-size:18px}.crmV20MoneyGrid .debt{background:#fff7ed;border-color:#fed7aa}.crmV20MoneyGrid .debt strong{color:#c2410c}.crmV20MoneyGrid .ok{background:#f0fdf4;border-color:#bbf7d0}.crmV20Payments{display:flex;flex-direction:column;gap:7px;margin:8px 0}.crmV20Payments>div{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:9px 11px;border:1px solid #e8edf4;border-radius:10px}.crmV20Payments>div>div{display:flex;flex-direction:column;gap:2px}.crmV20Payments span,.crmV20Payments small{font-size:12px;color:#7b879b}.crmV20PaymentForm{display:grid;grid-template-columns:1fr 1fr 1.5fr auto;gap:8px;margin-top:12px}.crmV20PaymentForm input,.crmV20PaymentForm select{min-width:0;padding:10px;border:1px solid #dce3ed;border-radius:10px;background:#fff}.crmV20PaymentForm button{border:0;border-radius:10px;padding:10px 14px;background:#1f6feb;color:#fff;font-weight:700}.crmLaborCostEditor{flex-wrap:wrap}.crmLaborCostEditor label{min-width:190px}
+@media(max-width:720px){.crmV20MoneyGrid{grid-template-columns:1fr}.crmV20PaymentForm{grid-template-columns:1fr}.crmV20Payments>div{align-items:flex-start}.crmV20PaymentForm button{width:100%}}
+
+/* GarageFlow v21 - service management */
+.crmV21StatButton{border:0;text-align:left;cursor:pointer;font:inherit;color:inherit}.crmV21StatButton:hover{transform:translateY(-1px);box-shadow:0 8px 24px rgba(15,38,72,.08)}
+.crmV21Period{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin-bottom:16px}.crmV21Period strong{margin-right:6px}.crmV21Period button{border:1px solid #d9e2ef;background:#fff;border-radius:10px;padding:9px 14px;cursor:pointer;font-weight:700;color:#66758b}.crmV21Period button.active{background:#1769e0;color:#fff;border-color:#1769e0}
+.crmV21FinanceStats{grid-template-columns:repeat(3,minmax(0,1fr))}.crmV21DebtStat strong{color:#c85635}.crmV21MethodList{display:flex;flex-direction:column;gap:0}.crmV21MethodList>div{display:flex;justify-content:space-between;align-items:center;gap:16px;padding:13px 0;border-bottom:1px solid #edf1f6}.crmV21MethodList>div:last-child{border-bottom:0}.crmV21MethodList span{display:flex;flex-direction:column;gap:3px}.crmV21MethodList small{color:#8a97aa;font-size:12px}.crmV21Journal{margin-top:18px}.crmV21Table{display:flex;flex-direction:column}.crmV21Table>button{display:grid;grid-template-columns:150px minmax(220px,1fr) 150px 120px 20px;gap:12px;align-items:center;border:0;border-top:1px solid #edf1f6;background:transparent;padding:14px 4px;text-align:left;cursor:pointer;color:#14233c}.crmV21Table>button:hover{background:#f7faff}.crmV21Table span{display:flex;flex-direction:column;gap:3px}.crmV21Table small{color:#8a97aa}.crmV21Table>button>strong{text-align:right}
+@media(max-width:800px){.crmV21FinanceStats{grid-template-columns:repeat(2,minmax(0,1fr))}.crmV21Table>button{grid-template-columns:90px 1fr auto}.crmV21Table>button>span:nth-child(3){display:none}.crmV21Table>button>strong{grid-column:3}.crmV21Table>button>svg{display:none}}
+
+/* GarageFlow v22 — staff + purchasing */
+.crmV22StaffGrid{display:grid;grid-template-columns:repeat(auto-fit,minmax(280px,1fr));gap:14px;margin-bottom:16px}.crmV22MasterCard{min-width:0}.crmV22Money{display:grid;grid-template-columns:repeat(3,1fr);gap:8px}.crmV22Money span{display:grid;gap:4px;padding:10px;border-radius:12px;background:#f7f9fc;color:#7b8798;font-size:11px}.crmV22Money strong{font-size:16px;color:#14233c}.crmV22Money .due{background:#fff5e8}.crmV22Money .due strong{color:#b56500}.crmV22Payout{display:grid;grid-template-columns:1.2fr 1fr 1fr 1.4fr auto;gap:9px;align-items:end;margin-bottom:16px}.crmV22Payout .crmPanelHeader{grid-column:1/-1}.crmV22Payout input,.crmV22Payout select,.crmV22Warehouse input,.crmV22Warehouse select{width:100%;box-sizing:border-box;border:1px solid #dfe5ed;border-radius:10px;background:#fff;padding:10px;font:inherit}.crmV22History{display:grid}.crmV22History>div{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:11px 2px;border-top:1px solid #edf1f6}.crmV22History>div:first-child{border-top:0}.crmV22History span{display:grid;gap:2px}.crmV22History small{color:#8996a8}.crmV22History b{white-space:nowrap}.crmV22Warehouse{margin-top:16px}.crmV22SupplierList{display:grid;gap:6px;margin-top:10px}.crmV22SupplierList span{display:grid;padding:8px 10px;background:#f7f9fc;border-radius:10px}.crmV22SupplierList small{color:#8793a6}.crmV22Warehouse .crmV4Grid{margin-bottom:16px}
+@media(max-width:760px){.crmV22Money{grid-template-columns:1fr}.crmV22Payout{grid-template-columns:1fr}.crmV22Payout .crmPanelHeader{grid-column:auto}.crmV22StaffGrid{grid-template-columns:1fr}}
+
+/* GarageFlow v23 */
+.crmV23MasterButton{width:100%;text-align:left;border:0;cursor:pointer;font:inherit;color:inherit}
+.crmV23MasterButton:hover{transform:translateY(-1px);box-shadow:0 10px 28px rgba(15,35,70,.08)}
+.crmV23MasterModal{max-width:820px}
+.crmV23MasterModal .crmV22History button{width:100%;border:0;background:transparent;display:flex;justify-content:space-between;align-items:center;padding:12px 0;text-align:left;cursor:pointer;color:inherit}
+.crmV23MasterModal .crmV22History button+button{border-top:1px solid #edf1f6}
+
+/* GarageFlow v24 - Рабочий центр */
+.crmV24WorkCenter{background:#fff;border:1px solid #e5eaf1;border-radius:20px;padding:20px;margin-bottom:18px;box-shadow:0 8px 24px rgba(21,43,77,.05)}
+.crmV24Flow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:10px;margin-top:16px}
+.crmV24Flow button{border:1px solid #e5eaf1;background:#f8fafc;border-radius:16px;padding:15px;text-align:left;cursor:pointer;min-height:105px;color:inherit}
+.crmV24Flow button:hover{border-color:#b9d2ff;background:#f4f8ff}.crmV24Flow button.warn{background:#fff8ed;border-color:#ffd7a0}
+.crmV24Flow span,.crmV24Flow small{display:block;color:#7c8aa0}.crmV24Flow strong{display:block;font-size:22px;margin:8px 0 4px;color:#14233d}
+.crmV24CenterGrid{display:grid;grid-template-columns:1.5fr 1fr;gap:14px;margin-top:14px}.crmV24Queue{border:1px solid #edf0f5;border-radius:16px;padding:14px}.crmV24Queue h3{margin:0 0 10px;font-size:15px}
+.crmV24Queue>button{width:100%;display:grid;grid-template-columns:58px 1fr 20px;gap:10px;align-items:center;border:0;border-top:1px solid #edf0f5;background:transparent;padding:11px 4px;text-align:left;cursor:pointer;color:inherit}.crmV24Queue>button:first-of-type{border-top:0}.crmV24Queue>button>b{color:#1769e0}.crmV24Queue>button span strong,.crmV24Queue>button span small{display:block}.crmV24Queue>button span small{color:#7c8aa0;margin-top:2px}
+.crmV24MasterLoad{display:flex;justify-content:space-between;align-items:center;padding:11px 4px;border-top:1px solid #edf0f5}.crmV24MasterLoad:first-of-type{border-top:0}.crmV24MasterLoad span strong,.crmV24MasterLoad span small{display:block}.crmV24MasterLoad span small{color:#7c8aa0}.crmV24MasterLoad>b{font-size:20px}
+@media(max-width:900px){.crmV24Flow{grid-template-columns:repeat(2,minmax(0,1fr))}.crmV24CenterGrid{grid-template-columns:1fr}.crmV24WorkCenter{padding:14px}.crmV24Flow button{min-height:92px}.crmV24Flow strong{font-size:18px}}
+
+/* GarageFlow v25 - production readiness polish */
+.crmV25Workflow{display:grid;grid-template-columns:repeat(5,minmax(0,1fr));gap:7px;margin:12px 0 16px;padding:12px;border:1px solid #e5eaf1;border-radius:14px;background:#f8fafc}
+.crmV25WorkflowStep{display:grid;grid-template-columns:26px 1fr;align-items:center;gap:6px;min-width:0;color:#96a1b2}
+.crmV25WorkflowStep span{width:26px;height:26px;border-radius:50%;display:grid;place-items:center;background:#e9edf3;font-size:11px;font-weight:900}
+.crmV25WorkflowStep small{font-size:10px;font-weight:800;line-height:1.15}
+.crmV25WorkflowStep.complete{color:#258044}.crmV25WorkflowStep.complete span{background:#def4e5;color:#258044}
+.crmV25WorkflowStep.current{color:#1769e0}.crmV25WorkflowStep.current span{background:#1769e0;color:#fff;box-shadow:0 0 0 4px #e8f1ff}
+.crmV25WorkflowStep.cancelled{opacity:.55}
+.crmV25Readiness{border:1px solid #e5eaf1;border-radius:14px;padding:13px;margin-bottom:14px;background:#fff}
+.crmV25ReadinessHead{display:flex;justify-content:space-between;align-items:center;gap:12px}.crmV25ReadinessHead>div{display:grid;gap:2px}.crmV25ReadinessHead strong{font-size:13px}.crmV25ReadinessHead small{font-size:10px;color:#8793a6}.crmV25ReadinessHead b{font-size:18px;color:#1769e0}
+.crmV25ReadinessBar{height:7px;background:#edf1f6;border-radius:999px;overflow:hidden;margin:9px 0}.crmV25ReadinessBar i{display:block;height:100%;background:#1769e0;border-radius:999px;transition:width .2s ease}
+.crmV25Checks{display:flex;gap:6px;flex-wrap:wrap}.crmV25Checks span{font-size:10px;font-weight:800;border-radius:999px;padding:6px 8px;background:#f3f5f8;color:#7c899b}.crmV25Checks span.ok{background:#eaf8ee;color:#267640}.crmV25Checks span.pending{background:#fff7e8;color:#9a6200}
+@media(max-width:700px){.crmV25Workflow{grid-template-columns:1fr;gap:5px}.crmV25WorkflowStep{grid-template-columns:24px 1fr}.crmV25WorkflowStep span{width:24px;height:24px}.crmV25Checks{display:grid;grid-template-columns:1fr 1fr}.crmV25Checks span{text-align:center}.crmModalActions{position:sticky;bottom:calc(-20px - env(safe-area-inset-bottom));z-index:8;background:#fff;padding:10px 0 calc(12px + env(safe-area-inset-bottom));border-top:1px solid #edf1f6}}
+
+/* ===== GarageFlow v27 — daily operations / dispatch center ===== */
+.crmV27Today{display:grid;gap:16px;margin:0 0 18px}.crmV27TodayStats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:10px}.crmV27TodayStats>div{border:1px solid #e5eaf1;background:#fff;border-radius:16px;padding:14px;display:grid;gap:4px}.crmV27TodayStats span{font-size:12px;color:#8793a6}.crmV27TodayStats strong{font-size:26px;color:#17233a}.crmV27TodayStats small{font-size:11px;color:#8793a6}.crmV27TodayStats .danger{border-color:#f0b7b7;background:#fff7f7}.crmV27TodayStats .danger strong{color:#c63f3f}.crmV27DispatchGrid{display:grid;grid-template-columns:minmax(0,2fr) minmax(260px,.8fr);gap:14px;align-items:start}.crmV27Dispatch{display:grid;gap:12px}.crmV27BayRow{display:grid;grid-template-columns:92px 1fr;gap:10px;padding-top:12px;border-top:1px solid #edf0f4}.crmV27BayRow:first-of-type{border-top:0;padding-top:0}.crmV27BayTitle{display:grid;align-content:start;gap:3px}.crmV27BayTitle strong{font-size:13px}.crmV27BayTitle span{font-size:11px;color:#8793a6}.crmV27BayJobs{display:grid;gap:8px}.crmV27BayEmpty{padding:18px;border:1px dashed #dbe2eb;border-radius:12px;color:#99a4b3;text-align:center;font-size:12px}.crmV27Job{display:grid;grid-template-columns:minmax(0,1fr) auto;gap:10px;align-items:center;border:1px solid #e5eaf1;background:#f8fafc;border-radius:13px;padding:10px}.crmV27Job.conflict{border-color:#efb2b2;background:#fff6f6}.crmV27JobMain{border:0;background:transparent;text-align:left;color:inherit;display:grid;grid-template-columns:92px 1fr;gap:2px 10px;cursor:pointer;min-width:0}.crmV27JobMain time{grid-row:1/3;font-weight:900;color:#1672f3;align-self:center}.crmV27JobMain strong{font-size:12px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV27JobMain span{font-size:11px;color:#7e8ba0;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.crmV27Quick{display:flex;gap:5px;align-items:center}.crmV27Quick button,.crmV27Quick select{border:1px solid #dfe5ed;background:#fff;border-radius:9px;padding:7px 8px;font:inherit;font-size:11px;color:#4b5b72}.crmV27Quick button{font-weight:800;cursor:pointer}.crmV27Quick button:disabled{opacity:.5}.crmV27Side{display:grid;gap:14px}.crmV27MasterList,.crmV27Unscheduled{display:grid;gap:7px}.crmV27MasterList>div,.crmV27Unscheduled>button{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:10px 11px;background:#f7f9fc;border-radius:11px}.crmV27MasterList span,.crmV27Unscheduled span{display:grid;gap:2px}.crmV27MasterList small,.crmV27Unscheduled small{font-size:10px;color:#8793a6}.crmV27MasterList b{font-size:12px;color:#1672f3}.crmV27Unscheduled>button{width:100%;border:0;color:inherit;text-align:left;cursor:pointer}.crmV27ConflictBanner{display:flex;align-items:flex-start;gap:10px;border:1px solid #efb2b2;background:#fff4f4;color:#a92e2e;border-radius:14px;padding:12px 14px}.crmV27ConflictBanner div{display:grid;gap:2px}.crmV27ConflictBanner span{font-size:11px}.crmV27Today+.crmMonthToolbar{margin-top:4px}@media(max-width:1100px){.crmV27DispatchGrid{grid-template-columns:1fr}.crmV27Side{grid-template-columns:1fr 1fr}.crmV27Job{grid-template-columns:1fr}.crmV27Quick{flex-wrap:wrap}}@media(max-width:760px){.crmV27TodayStats{grid-template-columns:1fr 1fr}.crmV27Side{grid-template-columns:1fr}.crmV27BayRow{grid-template-columns:1fr}.crmV27BayTitle{display:flex;justify-content:space-between}.crmV27JobMain{grid-template-columns:78px 1fr}.crmV27Quick{display:grid;grid-template-columns:1fr 1fr}.crmV27Quick select{min-width:0;width:100%}.crmV19OpsSwitch{width:100%;overflow-x:auto}.crmV19OpsSwitch button{white-space:nowrap;flex:1}}
+
+/* GarageFlow v27.2 — conflict control */
+.crmV272JobWarning{grid-column:2;display:flex;align-items:center;gap:5px;margin-top:4px;color:#b42318;font-size:10px;font-style:normal;font-weight:800;white-space:normal}.crmV27Job.conflict .crmV27JobMain time{color:#c63f3f}.crmV272ConflictDetails{display:grid;gap:5px;margin-top:7px}.crmV272ConflictDetails button{border:0;background:rgba(255,255,255,.72);color:#8f2424;border-radius:9px;padding:7px 9px;text-align:left;font:inherit;font-size:11px;cursor:pointer}.crmV272ConflictDetails button:hover{background:#fff}@media(max-width:760px){.crmV272JobWarning{grid-column:1/-1}}
+
+/* GarageFlow v27.3 — mobile order modal actions hotfix */
+@media (max-width:700px){
+  .crmModalActions{
+    position:static!important;
+    bottom:auto!important;
+    z-index:auto!important;
+    background:transparent!important;
+    padding:0!important;
+    border-top:0!important;
+    margin-top:22px!important;
+  }
 }
